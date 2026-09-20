@@ -17,6 +17,10 @@ import { createRouter } from './core/router.mjs';
 import { createWorker } from './core/worker.mjs';
 import { createHandleEvent } from './core/handleEvent.mjs';
 import { createReconcile } from './health/reconcile.mjs';
+import { createArchiver } from './health/archiver.mjs';
+import { createOAuth } from './lark/oauth.mjs';
+import { createUserToken } from './lark/user-token.mjs';
+import { createOAuthRoutes } from './core/oauth-routes.mjs';
 import { createWatchdog } from './health/watchdog.mjs';
 import { createHttp } from './http.mjs';
 import { createWsTransport } from './transport/ws.mjs';
@@ -36,7 +40,12 @@ export async function boot({ env = process.env } = {}) {
   if (!config.live) log.warn('RELAY_LIVE 未置 1：使用 fake api，不建立任何长连接');
 
   const files = createFiles({ config, log });
-  const outbox = createOutbox({ db, api, files, log });
+  // 用户身份要先于 outbox 建：回传以主人名义发，outbox 发送时要问它取令牌。
+  // 令牌只在这一个进程里持有和刷新——refresh_token 一次性，两处各存一份会互相顶掉。
+  const oauth = createOAuth({ appId: config.app_id, appSecret: config.secrets.app_secret, log });
+  const userToken = createUserToken({ db, oauth, log });
+  const outbox = createOutbox({ db, api, files, log, userToken });
+  outbox.setOwnerTarget({ type: 'open_id', id: config.teacher_open_id });
   const router = createRouter({ db });
   const worker = createWorker({ db, api, files, outbox, router, config, log });
 
@@ -45,6 +54,10 @@ export async function boot({ env = process.env } = {}) {
   const handleEvent = createHandleEvent({ db, config, log, wake });
 
   const reconcile = createReconcile({ db, api, config, log, health, handleEvent });
+
+  // 归档线：机器人看不到别人私聊主人的消息，只能用主人自己授权的身份去读
+  const oauthRoutes = createOAuthRoutes({ db, oauth, api, userToken, config, log });
+  const archiver = createArchiver({ db, api, userToken, config, log, health, handleEvent });
   const notify = (text) => outbox.queue({
     target: { type: 'open_id', id: config.teacher_open_id },
     msgType: 'text', payload: { text }, purpose: 'alert',
@@ -59,6 +72,7 @@ export async function boot({ env = process.env } = {}) {
 
   const http = createHttp({
     config, log, health, db, outbox, files, api, reconcile,
+    userToken, oauthRoutes, archiver,
     webhookHandler: transport.handler,
   });
 
@@ -86,19 +100,29 @@ export async function boot({ env = process.env } = {}) {
     reconcileTimer = setInterval(() => { reconcile.safeOnce().catch(() => {}); }, everyMs);
     reconcileTimer.unref?.();
     watchdog.start();
+
+    // 归档线只在授权过之后才跑；没授权时静默不动，healthz 里看得出来
+    archiver.start((config.archive?.interval_sec ?? 300) * 1000);
+    userToken.startKeepalive();
+    const ut = userToken.status();
+    if (!ut.authorized) {
+      log.warn('用户身份尚未授权，别人私聊你本人的消息暂时收不到。调 POST /api/oauth/start 拿授权链接');
+    }
   }
 
   async function shutdown() {
     for (const t of pumps) clearInterval(t);
     if (reconcileTimer) clearInterval(reconcileTimer);
     watchdog.stop();
+    archiver.stop();
+    userToken.stopKeepalive();
     await transport.stop();
     await http.close();
     db.raw.close?.();
     log.info('已停止');
   }
 
-  return { config, db, api, files, outbox, worker, handleEvent, reconcile, watchdog, http, transport, shutdown };
+  return { config, db, api, files, outbox, worker, handleEvent, reconcile, archiver, userToken, oauthRoutes, watchdog, http, transport, shutdown };
 }
 
 // 直接被 node 拉起时才自启；被测试 import 时不自启。

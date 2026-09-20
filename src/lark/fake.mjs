@@ -4,7 +4,7 @@ import { writeFile } from 'node:fs/promises';
 export function createFakeApi({ log } = {}) {
   const calls = [];
   const failures = new Map(); // method -> Error，触发一次就消费掉
-  const state = { seq: 0, downloadContent: 'fake', inbox: [], chats: [] };
+  const state = { seq: 0, downloadContent: 'fake', inbox: [], chats: [], userInfo: { openId: 'ou_owner', name: 'Owner' } };
 
   function record(method, args) {
     calls.push({ method, args });
@@ -81,10 +81,26 @@ export function createFakeApi({ log } = {}) {
 
   // 注意：真实 api.mjs 里这个方法目前恒抛错（飞书没有对应接口）。
   // 假实现按测试需要返回确定性的假 chat_id，签名保持一致即可。
+  // 真实端点是 POST /open-apis/im/v1/chat_p2p/batch_query（SDK 类型里没收录，从官方 CLI 挖出来的）。
+  // 假实现按同样的形状回：给什么 open_id 就回一个稳定的假 chat_id。
+  async function resolveP2pChats(peerOpenIds, opts = {}) {
+    record('resolveP2pChats', [peerOpenIds, opts]);
+    maybeFail('resolveP2pChats');
+    const out = {};
+    for (const id of peerOpenIds ?? []) out[id] = `oc_fake_${String(id).slice(-6)}`;
+    return out;
+  }
+
   async function resolveP2pChat(peerOpenId, opts = {}) {
     record('resolveP2pChat', [peerOpenId, opts]);
     maybeFail('resolveP2pChat');
     return `oc_fake_${String(peerOpenId).slice(-6)}`;
+  }
+
+  async function getUserInfo(opts = {}) {
+    record('getUserInfo', [opts]);
+    maybeFail('getUserInfo');
+    return state.userInfo;
   }
 
   function reset() {
@@ -114,9 +130,13 @@ export function createFakeApi({ log } = {}) {
     forward,
     listMyChats,
     resolveP2pChat,
+    resolveP2pChats,
+    getUserInfo,
     // 测试用检查面：download 的假内容、listMessages/listMyChats 的预置数据，都可直接读写。
     get downloadContent() { return state.downloadContent; },
     set downloadContent(v) { state.downloadContent = v; },
+    get userInfo() { return state.userInfo; },
+    set userInfo(v) { state.userInfo = v; },
     get inbox() { return state.inbox; },
     set inbox(v) { state.inbox = v; },
     get chats() { return state.chats; },

@@ -205,8 +205,8 @@ export function openDb(path) {
       .prepare(`
         INSERT INTO outbox (
           uuid, target_type, target_id, msg_type, payload_json,
-          reply_to, purpose, route_origin, next_at, created_at
-        ) VALUES (?,?,?,?,?, ?,?,?,?,?)
+          reply_to, purpose, route_origin, identity, next_at, created_at
+        ) VALUES (?,?,?,?,?, ?,?,?,?,?,?)
       `)
       .run(
         row.uuid ?? randomUUID(),
@@ -217,6 +217,7 @@ export function openDb(path) {
         row.reply_to ?? null,
         row.purpose,
         row.route_origin ?? null,
+        row.identity ?? 'bot',
         row.next_at ?? now,
         now,
       );

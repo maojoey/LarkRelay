@@ -108,7 +108,63 @@ ssh larkrelay-host "du -sh /data/larkrelay/files"
 
 `/healthz` 的字段（`src/health/state.mjs`）里最该盯的是 `wsState`（长连接是否 connected）、
 `lastEventAt`（最后一次真收到事件的时间）、`missed24h` 与 `splitSuspect`（对账发现漏消息或
-疑似有人在别处抢同一应用的事件）。
+疑似有人在别处抢同一应用的事件）。启用了用户身份归档的话，还要盯 `user_identity` 和
+`archive` 这两段，见下一节。
+
+## 用户身份
+
+归档线（补「别人私聊你本人」这部分消息的那条线，见 `docs/SETUP.md` 第 5 步）靠用户身份的
+令牌活着。令牌一断是**静默漏数据**——不会有人告诉你哪条消息没收到，只能靠 `/healthz` 主动发现。
+
+### 看状态
+
+```powershell
+ssh larkrelay-host "docker compose -f /opt/larkrelay/current/deploy/docker-compose.yml exec larkrelay node bin/relay.mjs health"
+```
+
+看输出里的「用户身份」「归档线」两行；或者直接看 `/healthz` 的 `user_identity` 段：
+
+| 字段 | 含义 |
+|---|---|
+| `authorized` | 现在能不能用；`false` 时看 `reason` |
+| `reason` | 只在没授权成功时出现；`never_authorized` = 从没走过授权流程 |
+| `dead` | 有值就是令牌已判死，值是判死原因；正常应为 `null` |
+| `reauth_due_at` / `reauth_due_in_days` | 距离官方 365 天硬顶还有多久 |
+| `reauth_warning` | 剩不到 30 天时变 `true`，该准备重新走一次授权了 |
+| `scope` | 当前令牌实际拿到的权限 |
+
+### 重新授权
+
+令牌判死（`dead` 有值）或快到 365 天硬顶（`reauth_warning: true`）时，重新走一遍
+`docs/SETUP.md` 第 5 步：
+
+```powershell
+ssh larkrelay-host "docker compose -f /opt/larkrelay/current/deploy/docker-compose.yml exec larkrelay node bin/relay.mjs auth"
+```
+
+打印出的链接**用你本人的飞书账号**在浏览器里打开、点同意，回来确认 `user_identity.authorized`
+变回 `true`、`dead` 变回 `null`。不需要先清掉旧状态，新一轮授权会直接覆盖旧令牌。
+
+### 令牌失效的症状
+
+- `/healthz` 返回 503，`user_identity.authorized: false` 且 `dead` 有值
+- 归档线报错：`archive.fail_streak` 持续增长，`archive.last_error` 里能看到具体原因
+  （常见是「用户令牌已失效」「refresh_token 已过期」）
+- 该以你本人名义发的回复被**降级成机器人名义**发出（对方收到的署名不对），主人会另收到
+  一条说明降级原因的提醒消息
+
+### 手动触发归档
+
+平时归档按 `config.archive.interval_sec`（默认 300 秒）自动跑，不需要手动介入。怀疑漏了、
+等不及下一轮时手动催一次：
+
+```powershell
+ssh larkrelay-host "docker compose -f /opt/larkrelay/current/deploy/docker-compose.yml exec larkrelay node bin/relay.mjs archive"
+```
+
+（等价的管理接口是 `POST /api/archive`。）输出里的会话数、扫描条数、补录条数、失败会话数
+能看出这一轮归档做了什么；`mode` 是当前的会话发现方式——`list`（直接列出会话）或
+`contacts`（按已知联系人逐个解析单聊，见 README「用户身份的三条限制」第 3 条）。
 
 ## 手动补录
 
@@ -206,3 +262,7 @@ ssh larkrelay-host "rm -rf /data/larkrelay/files/2026/09"
 | 磁盘快满 | `files/` 附件堆积，或历史 release/镜像没清 | 参考「人工归档附件」；`remote-deploy.sh` 只自动保留最近 5 个 release/镜像，更早的手工清 |
 | 长连接一直 `reconnecting` | 网络抖动，或应用在飞书后台被下线/禁用 | 看 `wsState`；同时确认没有第二个消费者在抢同一应用的事件 |
 | webhook 模式下反代起不来或不写日志 | 日志文件不存在或属主不对 | 先 `touch` + `chown`，再验证配置语法，最后才 reload |
+| `user_identity.authorized=false` 且 `reason=never_authorized` | 用户身份从没授权过 | 走 `docs/SETUP.md` 第 5 步 |
+| `user_identity.dead` 有值 | 令牌已判死（服务端拒绝或 refresh_token 过期） | 见「用户身份 → 重新授权」 |
+| `archive.fail_streak` 持续增长 | 归档线在失败 | 看 `archive.last_error` 定位原因 |
+| 学生/联系人收到的回复署名是机器人而不是你本人 | 用户身份不可用，回复被降级 | 看 `/healthz` 的 `user_identity`，按上面重新授权 |

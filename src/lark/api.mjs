@@ -201,19 +201,49 @@ export function createApi({ appId, appSecret, log }) {
     return items;
   }
 
-  // 已知对方 open_id，换取与他的单聊 chat_id：查过 SDK 类型定义（node_modules/@larksuiteoapi/node-sdk/
-  // types/index.d.ts 里 im.chat 的全部方法：get/list/search/create/update/delete/link 等），
-  // create 只能建群（data 里没有「对端 open_id」这种字段，chat_mode 也只是未加约束的 string），
-  // list 的文档原文还写明「获取到的群列表中，不包含单聊」——即飞书没有「已知 open_id 直接换/建单聊
-  // chat_id」的接口。不要瞎编端点，只能提示调用方换路子。
-  async function resolveP2pChat(peerOpenId, { asUser } = {}) {
-    void peerOpenId;
-    void asUser;
-    throw new Error('resolveP2pChat 失败：飞书没有提供该能力，请改用 listMyChats 或从历史消息里取 chat_id');
+  // 已知对方 open_id，批量换取与他们的单聊 chat_id。
+  //
+  // **SDK 的类型定义里没有这个接口**（`im.chat` 下只有 get/list/search/create/update/delete/link，
+  // create 只能建群），所以得用 client.request 直接打。端点是从官方 CLI 的 dry-run 里挖出来的，
+  // 它解析 `--user-id` 走的就是这条。纯查询、无副作用。
+  //
+  // 为什么不用「发一条消息，从返回里取 chat_id」那个办法：那会真的给对方发消息，
+  // 拿 chat_id 的代价是骚扰人，不能接受。
+  async function resolveP2pChats(peerOpenIds, { asUser } = {}) {
+    if (!peerOpenIds?.length) return {};
+    const out = {};
+    // 批量接口，分片避免请求过大
+    for (let i = 0; i < peerOpenIds.length; i += 100) {
+      const slice = peerOpenIds.slice(i, i + 100);
+      const data = await call(() => client.request({
+        method: 'POST',
+        url: '/open-apis/im/v1/chat_p2p/batch_query',
+        params: { user_id_type: 'open_id' },
+        data: { user_id_list: slice },
+      }, userOpts(asUser)), 'resolveP2pChats');
+      for (const it of data?.p2p_chats ?? data?.items ?? []) {
+        const uid = it.user_id ?? it.open_id;
+        if (uid && it.chat_id) out[uid] = it.chat_id;
+      }
+    }
+    return out;
   }
+
+  // 拿「当前这个用户令牌属于谁」。授权回调里用它做身份校验：
+  // 回调地址必须公开可达，不校验的话任何人都能用自己的账号走完流程、把主人的令牌顶掉。
+  async function getUserInfo({ asUser }) {
+    const data = await call(() => client.request({
+      method: 'GET',
+      url: '/open-apis/authen/v1/user_info',
+    }, userOpts(asUser)), 'getUserInfo');
+    return { openId: data?.open_id ?? null, name: data?.name ?? null };
+  }
+
+  const resolveP2pChat = async (peerOpenId, opts) =>
+    (await resolveP2pChats([peerOpenId], opts))[peerOpenId] ?? null;
 
   return {
     getTenantToken, sendText, sendCard, sendFile, sendImage, download, listMessages, forward,
-    listMyChats, resolveP2pChat,
+    listMyChats, resolveP2pChat, resolveP2pChats, getUserInfo,
   };
 }

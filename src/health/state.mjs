@@ -10,6 +10,13 @@ const state = {
   pollFailStreak: 0,
   missed24h: 0,
   splitSuspect: false,      // 对账发现 ws 明明 connected 却漏了消息 → 疑似有人抢同一应用的事件
+
+  // 用户身份归档线（机器人看不到的那一半）
+  archiveLastAt: null,
+  archiveChats: 0,
+  archiveFailed: 0,         // 本轮里读不了的会话数
+  archiveFailStreak: 0,
+  archiveLastError: null,
 };
 
 export const health = {

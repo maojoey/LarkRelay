@@ -73,12 +73,21 @@ export function createWorker({ db, api, files, outbox, router, config, log }) {
     }
   }
 
-  // 回传：老师回复某条转发 → 发给原主。附件同样重新上传过去。
+  // 回传：主人回复某条转发 → 发给原主。附件同样重新上传过去。
+  //
+  // **以主人本人的名义发**（identity: 'owner'）：对方收到的是真人回复，不是机器人转达。
+  // fallback_prefix 只在用户身份不可用、被迫降级成机器人发时才会被加上——
+  // 那时候必须让对方看出这是转达，否则机器人说话会被当成本人说话。
   async function relayReply(msg, attachments, route) {
     const target = { type: 'open_id', id: route.origin_open_id };
-    const body = `${relayPrefix(route.origin_kind, teacherName)}${msg.text ?? ''}`.trim();
     if (msg.text) {
-      outbox.queue({ target, msgType: 'text', payload: { text: body }, purpose: 'relay_reply' });
+      outbox.queue({
+        target,
+        msgType: 'text',
+        payload: { text: msg.text, fallback_prefix: relayPrefix(route.origin_kind, teacherName) },
+        purpose: 'relay_reply',
+        identity: 'owner',
+      });
     }
     for (const a of attachments) {
       if (a.status !== 'done') continue;
@@ -87,6 +96,7 @@ export function createWorker({ db, api, files, outbox, router, config, log }) {
         msgType: a.kind === 'image' ? 'image' : 'file',
         payload: { path: a.local_path, file_name: a.file_name },
         purpose: 'relay_reply',
+        identity: 'owner',
       });
     }
     const who = contactOf(route.origin_open_id)?.name

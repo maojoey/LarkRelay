@@ -11,9 +11,11 @@ export function backoffAt(attempts, now = Date.now()) {
   return now + Math.min(BASE_BACKOFF_MS * 2 ** attempts, MAX_BACKOFF_MS);
 }
 
-export function createOutbox({ db, api, files, log }) {
+export function createOutbox({ db, api, files, log, userToken }) {
+  let ownerTarget = null;
   // purpose: forward | relay_reply | receipt | alert | manual
-  function queue({ target, msgType, payload, replyTo, purpose, routeOrigin }) {
+  // identity: 'bot'（默认）| 'owner'（以主人本人名义发，需要用户身份授权）
+  function queue({ target, msgType, payload, replyTo, purpose, routeOrigin, identity = 'bot' }) {
     return db.enqueue({
       uuid: randomUUID(),
       target_type: target.type,
@@ -23,13 +25,34 @@ export function createOutbox({ db, api, files, log }) {
       reply_to: replyTo ?? null,
       purpose,
       route_origin: routeOrigin ? JSON.stringify(routeOrigin) : null,
+      identity,
     });
   }
 
-  async function send(row) {
+  /**
+   * 解析这一行该用谁的身份发。
+   * identity='owner' 但用户身份不可用时**降级成机器人发**，而不是发不出去——
+   * 老师回学生一句话，宁可署名变成机器人，也不能干脆没送到。降级会在正文前加回前缀，
+   * 并给主人回一条说明，免得他以为学生收到的是自己的口吻。
+   */
+  async function resolveIdentity(row) {
+    if (row.identity !== 'owner') return { asUser: undefined, degraded: false };
+    if (!userToken) return { asUser: undefined, degraded: true, why: '未接入用户身份' };
+    try {
+      return { asUser: await userToken.getAccessToken(), degraded: false };
+    } catch (e) {
+      return { asUser: undefined, degraded: true, why: e.message };
+    }
+  }
+
+  async function send(row, { asUser, degraded } = {}) {
     const target = { type: row.target_type, id: row.target_id };
     const payload = JSON.parse(row.payload_json);
-    const opts = { replyTo: row.reply_to ?? undefined, uuid: row.uuid };
+    // 降级时才加前缀：以本人名义发的时候加前缀反而怪
+    if (degraded && payload.fallback_prefix && payload.text) {
+      payload.text = `${payload.fallback_prefix}${payload.text}`;
+    }
+    const opts = { replyTo: row.reply_to ?? undefined, uuid: row.uuid, asUser };
     switch (row.msg_type) {
       case 'text': return api.sendText(target, payload.text, opts);
       case 'interactive': return api.sendCard(target, payload.card, opts);
@@ -46,7 +69,12 @@ export function createOutbox({ db, api, files, log }) {
     let sent = 0;
     for (const row of rows) {
       try {
-        const res = await send(row);
+        const idn = await resolveIdentity(row);
+        if (idn.degraded) {
+          log.warn('以主人身份发送不可用，降级为机器人发送', { id: row.id, why: idn.why });
+          notifyDegraded(row, idn.why);
+        }
+        const res = await send(row, idn);
         const messageId = res?.message_id ?? null;
         db.markOutboxSent(row.id, messageId);
         sent += 1;
@@ -88,5 +116,19 @@ export function createOutbox({ db, api, files, log }) {
     return { claimed: rows.length, sent };
   }
 
-  return { queue, tick };
+  // 降级只提醒一次，且绝不对提醒本身再提醒——否则一次失败会套出无穷多条
+  const degradedNotified = new Set();
+  function notifyDegraded(row, why) {
+    if (row.purpose === 'alert' || degradedNotified.has(row.id)) return;
+    degradedNotified.add(row.id);
+    if (!ownerTarget) return;
+    queue({
+      target: ownerTarget,
+      msgType: 'text',
+      payload: { text: `刚才那条回复是以机器人名义发出的，不是你本人：${why ?? '用户身份不可用'}。要恢复请重新授权。` },
+      purpose: 'alert',
+    });
+  }
+
+  return { queue, tick, setOwnerTarget: (t) => { ownerTarget = t; } };
 }
