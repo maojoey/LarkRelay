@@ -64,6 +64,12 @@ export function createApi({ appId, appSecret, log }) {
     return res;
   }
 
+  // asUser 有值 → 以该用户身份调用（IRequestOptions，作 SDK 方法的第二个参数）；
+  // 没有 → 维持现状，走应用身份，SDK 自己管 tenant_access_token。
+  function userOpts(asUser) {
+    return asUser ? lark.withUserAccessToken(asUser) : undefined;
+  }
+
   async function getTenantToken() {
     try {
       const token = await client.tokenManager.getTenantAccessToken();
@@ -75,18 +81,19 @@ export function createApi({ appId, appSecret, log }) {
     }
   }
 
-  async function sendByContent(target, content, msgType, { replyTo, uuid } = {}, label) {
+  async function sendByContent(target, content, msgType, { replyTo, uuid, asUser } = {}, label) {
+    const options = userOpts(asUser);
     if (replyTo) {
       const data = await call(() => client.im.message.reply({
         path: { message_id: replyTo },
         data: { content, msg_type: msgType, ...(uuid ? { uuid } : {}) },
-      }), label);
+      }, options), label);
       return { message_id: data.message_id };
     }
     const data = await call(() => client.im.message.create({
       params: { receive_id_type: target.type },
       data: { receive_id: target.id, msg_type: msgType, content, ...(uuid ? { uuid } : {}) },
-    }), label);
+    }, options), label);
     return { message_id: data.message_id };
   }
 
@@ -99,30 +106,32 @@ export function createApi({ appId, appSecret, log }) {
     return sendByContent(target, content, 'interactive', opts, 'sendCard');
   }
 
-  async function sendFile(target, localPath, { fileName, uuid } = {}) {
+  async function sendFile(target, localPath, { fileName, uuid, asUser } = {}) {
+    const options = userOpts(asUser);
     const file_type = fileTypeFor(localPath);
     const file_name = fileName ?? basename(localPath);
     const uploaded = await callUpload(() => client.im.file.create({
       data: { file_type, file_name, file: createReadStream(localPath) },
-    }), 'sendFile', 'file_key');
-    return sendByContent(target, JSON.stringify({ file_key: uploaded.file_key }), 'file', { uuid }, 'sendFile');
+    }, options), 'sendFile', 'file_key');
+    return sendByContent(target, JSON.stringify({ file_key: uploaded.file_key }), 'file', { uuid, asUser }, 'sendFile');
   }
 
-  async function sendImage(target, localPath, { uuid } = {}) {
+  async function sendImage(target, localPath, { uuid, asUser } = {}) {
+    const options = userOpts(asUser);
     const uploaded = await callUpload(() => client.im.image.create({
       data: { image_type: 'message', image: createReadStream(localPath) },
-    }), 'sendImage', 'image_key');
-    return sendByContent(target, JSON.stringify({ image_key: uploaded.image_key }), 'image', { uuid }, 'sendImage');
+    }, options), 'sendImage', 'image_key');
+    return sendByContent(target, JSON.stringify({ image_key: uploaded.image_key }), 'image', { uuid, asUser }, 'sendImage');
   }
 
-  async function download(messageId, fileKey, kind, destPath) {
+  async function download(messageId, fileKey, kind, destPath, { asUser } = {}) {
     const type = kind === 'image' ? 'image' : 'file';
     let res;
     try {
       res = await client.im.messageResource.get({
         params: { type },
         path: { message_id: messageId, file_key: fileKey },
-      });
+      }, userOpts(asUser));
     } catch (e) {
       log?.error('lark api 请求异常', { label: 'download', message: e.message });
       throw new Error(`download 失败：${e.message}`);
@@ -136,7 +145,8 @@ export function createApi({ appId, appSecret, log }) {
     return { size, mime };
   }
 
-  async function listMessages(chatId, startMs, endMs) {
+  async function listMessages(chatId, startMs, endMs, { asUser } = {}) {
+    const options = userOpts(asUser);
     const items = [];
     let pageToken;
     for (let page = 0; page < 20; page += 1) {
@@ -150,7 +160,7 @@ export function createApi({ appId, appSecret, log }) {
           page_size: 50,
           ...(pageToken ? { page_token: pageToken } : {}),
         },
-      }), 'listMessages');
+      }, options), 'listMessages');
       items.push(...(data?.items ?? []));
       if (!data?.has_more || !data?.page_token) break;
       pageToken = data.page_token;
@@ -158,14 +168,72 @@ export function createApi({ appId, appSecret, log }) {
     return items;
   }
 
-  async function forward(messageId, target) {
+  async function forward(messageId, target, { asUser } = {}) {
     const data = await call(() => client.im.message.forward({
       path: { message_id: messageId },
       params: { receive_id_type: target.type },
       data: { receive_id: target.id },
-    }), 'forward');
+    }, userOpts(asUser)), 'forward');
     return { message_id: data.message_id };
   }
 
-  return { getTenantToken, sendText, sendCard, sendFile, sendImage, download, listMessages, forward };
+  // 列出当前身份（应用或 asUser 指定的用户）所在的会话。
+  // types 官方文档未写明（文档只说返回结果不含单聊），但官方 CLI 实测会传 types=p2p,group；
+  // 这里原样透传，失败时靠 call() 把飞书的 code/msg 带出来，方便判断是不是这个参数不被接受。
+  async function listMyChats({ types = 'p2p,group', asUser } = {}) {
+    const options = userOpts(asUser);
+    const items = [];
+    let pageToken;
+    for (let page = 0; page < 20; page += 1) {
+      const data = await call(() => client.im.chat.list({
+        params: {
+          user_id_type: 'open_id',
+          sort_type: 'ByCreateTimeAsc',
+          page_size: 20,
+          types,
+          ...(pageToken ? { page_token: pageToken } : {}),
+        },
+      }, options), 'listMyChats');
+      items.push(...(data?.items ?? []));
+      if (!data?.has_more || !data?.page_token) break;
+      pageToken = data.page_token;
+    }
+    return items;
+  }
+
+  // 已知对方 open_id，批量换取与他们的单聊 chat_id。
+  //
+  // **SDK 的类型定义里没有这个接口**（`im.chat` 下只有 get/list/search/create/update/delete/link，
+  // create 只能建群），所以得用 client.request 直接打。端点是从官方 CLI 的 dry-run 里挖出来的，
+  // 它解析 `--user-id` 走的就是这条。纯查询、无副作用。
+  //
+  // 为什么不用「发一条消息，从返回里取 chat_id」那个办法：那会真的给对方发消息，
+  // 拿 chat_id 的代价是骚扰人，不能接受。
+  async function resolveP2pChats(peerOpenIds, { asUser } = {}) {
+    if (!peerOpenIds?.length) return {};
+    const out = {};
+    // 批量接口，分片避免请求过大
+    for (let i = 0; i < peerOpenIds.length; i += 100) {
+      const slice = peerOpenIds.slice(i, i + 100);
+      const data = await call(() => client.request({
+        method: 'POST',
+        url: '/open-apis/im/v1/chat_p2p/batch_query',
+        params: { user_id_type: 'open_id' },
+        data: { user_id_list: slice },
+      }, userOpts(asUser)), 'resolveP2pChats');
+      for (const it of data?.p2p_chats ?? data?.items ?? []) {
+        const uid = it.user_id ?? it.open_id;
+        if (uid && it.chat_id) out[uid] = it.chat_id;
+      }
+    }
+    return out;
+  }
+
+  const resolveP2pChat = async (peerOpenId, opts) =>
+    (await resolveP2pChats([peerOpenId], opts))[peerOpenId] ?? null;
+
+  return {
+    getTenantToken, sendText, sendCard, sendFile, sendImage, download, listMessages, forward,
+    listMyChats, resolveP2pChat, resolveP2pChats,
+  };
 }
