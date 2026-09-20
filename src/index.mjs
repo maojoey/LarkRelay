@@ -40,7 +40,12 @@ export async function boot({ env = process.env } = {}) {
   if (!config.live) log.warn('RELAY_LIVE 未置 1：使用 fake api，不建立任何长连接');
 
   const files = createFiles({ config, log });
-  const outbox = createOutbox({ db, api, files, log });
+  // 用户身份要先于 outbox 建：回传以主人名义发，outbox 发送时要问它取令牌。
+  // 令牌只在这一个进程里持有和刷新——refresh_token 一次性，两处各存一份会互相顶掉。
+  const oauth = createOAuth({ appId: config.app_id, appSecret: config.secrets.app_secret, log });
+  const userToken = createUserToken({ db, oauth, log });
+  const outbox = createOutbox({ db, api, files, log, userToken });
+  outbox.setOwnerTarget({ type: 'open_id', id: config.teacher_open_id });
   const router = createRouter({ db });
   const worker = createWorker({ db, api, files, outbox, router, config, log });
 
@@ -50,10 +55,7 @@ export async function boot({ env = process.env } = {}) {
 
   const reconcile = createReconcile({ db, api, config, log, health, handleEvent });
 
-  // 用户身份那条线：机器人看不到别人私聊主人的消息，只能用主人自己授权的身份去读。
-  // 令牌只在这一个进程里持有和刷新——refresh_token 一次性，两处各存一份会互相顶掉。
-  const oauth = createOAuth({ appId: config.app_id, appSecret: config.secrets.app_secret, log });
-  const userToken = createUserToken({ db, oauth, log });
+  // 归档线：机器人看不到别人私聊主人的消息，只能用主人自己授权的身份去读
   const oauthRoutes = createOAuthRoutes({ db, oauth, api, userToken, config, log });
   const archiver = createArchiver({ db, api, userToken, config, log, health, handleEvent });
   const notify = (text) => outbox.queue({

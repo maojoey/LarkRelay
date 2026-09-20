@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { unlinkSync } from 'node:fs';
+import { unlinkSync, readdirSync } from 'node:fs';
 import { openDb } from '../src/db.mjs';
 
 function makeInbound(overrides = {}) {
@@ -27,15 +27,17 @@ function makeInbound(overrides = {}) {
   };
 }
 
-test('迁移幂等：同一个库 open 两次 schema_migrations 只有一行', () => {
+// 断言「重开一次不会重跑」，而不是断言迁移条数——加新迁移不该让这条测试变红
+test('迁移幂等：同一个库 open 两次不会重跑迁移', () => {
   const path = join(tmpdir(), `larkrelay-test-${randomUUID()}.sqlite`);
   try {
     const db1 = openDb(path);
+    const first = db1.raw.prepare('SELECT id FROM schema_migrations ORDER BY id').all().map((r) => r.id);
     db1.raw.close();
     const db2 = openDb(path);
-    const rows = db2.raw.prepare('SELECT * FROM schema_migrations').all();
-    assert.equal(rows.length, 1);
-    assert.equal(rows[0].id, 1);
+    const second = db2.raw.prepare('SELECT id FROM schema_migrations ORDER BY id').all().map((r) => r.id);
+    assert.deepEqual(second, first, '重开不该多出记录');
+    assert.ok(first.length > 0 && first[0] === 1, '至少跑过第一条，且按序号从 1 开始');
     db2.raw.close();
   } finally {
     for (const suffix of ['', '-wal', '-shm']) {
@@ -44,10 +46,14 @@ test('迁移幂等：同一个库 open 两次 schema_migrations 只有一行', (
   }
 });
 
-test(':memory: 也能建表跑迁移', () => {
+test(':memory: 也能建表跑迁移，且 schema 目录里每个文件都应用到了', () => {
   const db = openDb(':memory:');
-  const row = db.raw.prepare('SELECT COUNT(*) AS n FROM schema_migrations').get();
-  assert.equal(row.n, 1);
+  const applied = db.raw.prepare('SELECT id FROM schema_migrations ORDER BY id').all().map((r) => r.id);
+  const files = readdirSync(new URL('../src/schema/', import.meta.url))
+    .filter((f) => f.endsWith('.sql'))
+    .map((f) => Number(f.slice(0, 3)))
+    .sort((a, b) => a - b);
+  assert.deepEqual(applied, files, '磁盘上有几个迁移文件就该应用几条');
 });
 
 test('insertInbound 去重：同一 message_id 第二次是 dup', () => {
