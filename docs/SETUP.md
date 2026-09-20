@@ -87,6 +87,48 @@ contact:user.base:readonly
 
 **验证**：应用状态显示「已发布」。**没发布的话调任何接口都会报 `app not released`。**
 
+### 1.7 用户身份权限（可选，要归档「别人私聊你本人」的消息才需要）
+
+机器人那 5 项权限只能看到「别人私聊机器人」的消息。如果还想归档「别人私聊你本人」的消息
+（机器人天生看不到这条，见 [README.md](../README.md)「一个必须先说清楚的前提」），
+回到「权限管理」页面，再开通这 6 项**用户权限**（和机器人权限在同一个搜索框里搜，只是类型
+不同）：
+
+```
+im:message:readonly
+im:message.p2p_msg:get_as_user
+im:message.group_msg:get_as_user
+im:chat:read
+contact:user.base:readonly
+offline_access
+```
+
+`offline_access` 是关键：没有它换不出 `refresh_token`，令牌两小时后就失效，没法长期归档。
+
+外加一项，**只有需要「以你本人名义回复」时才开**（只做归档、不打算用这个功能可以不开）：
+
+```
+im:message.send_as_user
+```
+
+**验证**：已开通权限列表里能看到这 6～7 条（取决于要不要 `send_as_user`）。
+
+### 1.8 配重定向 URL（同上，可选）
+
+**不需要是公网地址**，填 `http://localhost:8310/lark/oauth/callback` 即可，原因见第 5 步。
+
+左栏「安全设置」（有的版本叫「重定向 URL」单独一页），加一条：
+
+```
+https://example.com/lark/oauth/callback
+```
+
+把 `example.com` 换成你服务器的真实域名，路径要跟后面 `config.json` 里的
+`oauth.redirect_uri` **逐字一致**——协议、域名、路径、结尾有没有斜杠，一个字符不对都会在
+授权回调时报错。
+
+**验证**：安全设置页面里能看到这条 URL 已保存。
+
 ---
 
 ## 第 2 步：落地密钥（约 3 分钟）
@@ -112,6 +154,9 @@ notepad "$dir\secrets.json"
 
 再复制一份 `config.example.json` 为 `config.json`，把 `app_id`、`teacher_open_id`（你自己的 open_id）、
 `teacher_name`（想显示的称呼）填成真实值。`config.json` 不含密钥，可以随部署流程一起走版本控制之外的路径。
+
+**要做第 1.7/1.8 步的用户身份归档，还要填 `oauth.redirect_uri`**（跟安全设置里配的那个 URL 逐字一致）；
+不用这个功能就把整个 `oauth` 段留成 `config.example.json` 里的默认样子，`archiver` 不会被启用。
 
 ---
 
@@ -146,6 +191,91 @@ notepad "$dir\secrets.json"
 
 第 4 步是整套的核心：它证明「所有者回复卡片 → 内容回到原主」这条路通了。
 接入更多联系人后，这条路就是「所有者回复 → 回到那个联系人」。
+
+---
+
+## 第 5 步：完成用户身份授权（可选，要归档才需要）
+
+前提：第 1.7/1.8 步已经开好用户权限、配好重定向 URL，`config.json` 里 `teacher_open_id`
+和 `oauth.redirect_uri` 都是真实值，服务已经部署（第 3 步）。
+
+### 5.1 默认做法：不需要对公网开任何口
+
+**授权码在浏览器跳转时就明文躺在地址栏里**，所以重定向地址可以填
+`http://localhost:8310/lark/oauth/callback` —— 跳转落到**操作者自己的机器上**，
+那里没东西监听、页面直接报错都无所谓，把地址栏整条复制回来即可。
+
+这样整个服务保持**零入站端口**：长连接是出站的，管理接口只绑 `127.0.0.1`。
+全程也没有任何第三方碰得到授权码。
+
+> 若开发者后台不接受 `http://` 或 `localhost`（有的平台强制 https），就填一个**你自己拥有的
+> 域名**下的路径。同样**不需要真的去服务那个地址**，效果一样；只是别填你不控制的域名，
+> 否则授权码会落到别人手里。
+
+无论走哪条，安全都靠同样的三层校验，不靠「地址没人知道」这种脆弱假设：
+
+1. 必须先由主人（带 admin token）发起过一次授权，才会生成一个等待被核对的 `state`；
+2. `state` 必须命中且未过期，核对完立刻作废，重放没用；
+3. 换到令牌后会回查这个令牌到底是谁的，`open_id` 必须等于配置里的 `teacher_open_id`，
+   不是就拒绝、不落盘。
+
+即便授权码本身被截获也没用——没有 App Secret 换不出令牌。
+
+### 5.1b 可选：把回调接到公网做成自动的
+
+嫌复制地址栏麻烦的话，可以把 `oauth.callback_path`（默认 `/lark/oauth/callback`）
+经反向代理暴露出去，**只放行这一条路径**，其余一律不转发；`oauth.redirect_uri` 相应改成
+那个公网地址。反代配置方法见 `docs/OPERATIONS.md`「切 webhook 模式的完整步骤」一节
+（先 `validate` 语法、日志文件先建好再 `reload`）。
+
+**这是纯粹的便利性取舍**：省掉一次复制粘贴，换来一个对外开放的路径。校验逻辑两条路完全一样。
+
+### 5.2 发起授权
+
+```powershell
+ssh larkrelay-host "docker compose -f /opt/larkrelay/current/deploy/docker-compose.yml exec larkrelay node bin/relay.mjs auth"
+```
+
+会打印一个链接。**用你本人的飞书账号**在浏览器里打开、点「同意」。
+换别人的账号点同意会被拒绝——服务端会核对 `open_id`。
+
+### 5.2b 把地址栏粘回来（走 5.1 默认做法时）
+
+点完同意，浏览器会跳到 `oauth.redirect_uri`。**那个地址打不开是正常的**，
+授权码就在地址栏里。把地址栏**整条**复制下来：
+
+```
+http://localhost:8310/lark/oauth/callback?code=一串字符&state=另一串字符
+```
+
+然后：
+
+```powershell
+ssh larkrelay-host "docker compose -f /opt/larkrelay/current/deploy/docker-compose.yml exec larkrelay node bin/relay.mjs auth --callback-url '<粘在这里>'"
+```
+
+看到「授权成功」就完成了。
+
+（若走 5.1b 把回调接到了公网，这一步自动完成，页面会直接显示「授权成功」。）
+
+### 5.3 验证
+
+```powershell
+ssh larkrelay-host "docker compose -f /opt/larkrelay/current/deploy/docker-compose.yml exec larkrelay node bin/relay.mjs health"
+```
+
+看到「用户身份　已授权，NNN 天后需重新授权」就是通了；也可以直接看 `/healthz` 里
+`user_identity.authorized` 是不是 `true`。
+
+## 用户身份的三条限制
+
+启用第 5 步之前先知道，都是官方接口的限制，不是本项目能绕过的（细节见
+[README.md](../README.md)「用户身份的三条限制」）：
+
+1. **365 天硬顶**：满 365 天必须重新走一遍第 5 步，刷新再勤也推不掉。
+2. **令牌只能有一个持有者**：`refresh_token` 一次性，不要在别的地方对同一份授权再刷新一次。
+3. **单聊会话可能枚举不到**：官方接口不保证列出单聊，本项目会自动降级为按联系人解析，
+   降级后只覆盖已知的人。
 
 ## 出问题了看哪里
 

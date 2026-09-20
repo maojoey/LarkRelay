@@ -1,6 +1,6 @@
 // 单行 JSON 到 stdout，交给 Docker 的 json-file（已封顶 10m×3）。
 // 脱敏是硬要求：app_secret / admin_token 一旦进日志就等于进了备份与我的上下文。
-const SECRET_RE = /^(app_secret|admin_token|encrypt_key|verification_token|authorization|token|secret|password)$/i;
+const SECRET_RE = /^(app_secret|client_secret|admin_token|encrypt_key|verification_token|access_?token|refresh_?token|authorization|token|secret|password)$/i;
 
 function scrub(v, key = '') {
   if (typeof v === 'string' && SECRET_RE.test(key)) return `<redacted len=${v.length}>`;
