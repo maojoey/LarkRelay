@@ -64,6 +64,12 @@ export function createApi({ appId, appSecret, log }) {
     return res;
   }
 
+  // asUser 有值 → 以该用户身份调用（IRequestOptions，作 SDK 方法的第二个参数）；
+  // 没有 → 维持现状，走应用身份，SDK 自己管 tenant_access_token。
+  function userOpts(asUser) {
+    return asUser ? lark.withUserAccessToken(asUser) : undefined;
+  }
+
   async function getTenantToken() {
     try {
       const token = await client.tokenManager.getTenantAccessToken();
@@ -75,18 +81,19 @@ export function createApi({ appId, appSecret, log }) {
     }
   }
 
-  async function sendByContent(target, content, msgType, { replyTo, uuid } = {}, label) {
+  async function sendByContent(target, content, msgType, { replyTo, uuid, asUser } = {}, label) {
+    const options = userOpts(asUser);
     if (replyTo) {
       const data = await call(() => client.im.message.reply({
         path: { message_id: replyTo },
         data: { content, msg_type: msgType, ...(uuid ? { uuid } : {}) },
-      }), label);
+      }, options), label);
       return { message_id: data.message_id };
     }
     const data = await call(() => client.im.message.create({
       params: { receive_id_type: target.type },
       data: { receive_id: target.id, msg_type: msgType, content, ...(uuid ? { uuid } : {}) },
-    }), label);
+    }, options), label);
     return { message_id: data.message_id };
   }
 
@@ -99,30 +106,32 @@ export function createApi({ appId, appSecret, log }) {
     return sendByContent(target, content, 'interactive', opts, 'sendCard');
   }
 
-  async function sendFile(target, localPath, { fileName, uuid } = {}) {
+  async function sendFile(target, localPath, { fileName, uuid, asUser } = {}) {
+    const options = userOpts(asUser);
     const file_type = fileTypeFor(localPath);
     const file_name = fileName ?? basename(localPath);
     const uploaded = await callUpload(() => client.im.file.create({
       data: { file_type, file_name, file: createReadStream(localPath) },
-    }), 'sendFile', 'file_key');
-    return sendByContent(target, JSON.stringify({ file_key: uploaded.file_key }), 'file', { uuid }, 'sendFile');
+    }, options), 'sendFile', 'file_key');
+    return sendByContent(target, JSON.stringify({ file_key: uploaded.file_key }), 'file', { uuid, asUser }, 'sendFile');
   }
 
-  async function sendImage(target, localPath, { uuid } = {}) {
+  async function sendImage(target, localPath, { uuid, asUser } = {}) {
+    const options = userOpts(asUser);
     const uploaded = await callUpload(() => client.im.image.create({
       data: { image_type: 'message', image: createReadStream(localPath) },
-    }), 'sendImage', 'image_key');
-    return sendByContent(target, JSON.stringify({ image_key: uploaded.image_key }), 'image', { uuid }, 'sendImage');
+    }, options), 'sendImage', 'image_key');
+    return sendByContent(target, JSON.stringify({ image_key: uploaded.image_key }), 'image', { uuid, asUser }, 'sendImage');
   }
 
-  async function download(messageId, fileKey, kind, destPath) {
+  async function download(messageId, fileKey, kind, destPath, { asUser } = {}) {
     const type = kind === 'image' ? 'image' : 'file';
     let res;
     try {
       res = await client.im.messageResource.get({
         params: { type },
         path: { message_id: messageId, file_key: fileKey },
-      });
+      }, userOpts(asUser));
     } catch (e) {
       log?.error('lark api 请求异常', { label: 'download', message: e.message });
       throw new Error(`download 失败：${e.message}`);
@@ -136,7 +145,8 @@ export function createApi({ appId, appSecret, log }) {
     return { size, mime };
   }
 
-  async function listMessages(chatId, startMs, endMs) {
+  async function listMessages(chatId, startMs, endMs, { asUser } = {}) {
+    const options = userOpts(asUser);
     const items = [];
     let pageToken;
     for (let page = 0; page < 20; page += 1) {
@@ -150,7 +160,7 @@ export function createApi({ appId, appSecret, log }) {
           page_size: 50,
           ...(pageToken ? { page_token: pageToken } : {}),
         },
-      }), 'listMessages');
+      }, options), 'listMessages');
       items.push(...(data?.items ?? []));
       if (!data?.has_more || !data?.page_token) break;
       pageToken = data.page_token;
@@ -158,14 +168,52 @@ export function createApi({ appId, appSecret, log }) {
     return items;
   }
 
-  async function forward(messageId, target) {
+  async function forward(messageId, target, { asUser } = {}) {
     const data = await call(() => client.im.message.forward({
       path: { message_id: messageId },
       params: { receive_id_type: target.type },
       data: { receive_id: target.id },
-    }), 'forward');
+    }, userOpts(asUser)), 'forward');
     return { message_id: data.message_id };
   }
 
-  return { getTenantToken, sendText, sendCard, sendFile, sendImage, download, listMessages, forward };
+  // 列出当前身份（应用或 asUser 指定的用户）所在的会话。
+  // types 官方文档未写明（文档只说返回结果不含单聊），但官方 CLI 实测会传 types=p2p,group；
+  // 这里原样透传，失败时靠 call() 把飞书的 code/msg 带出来，方便判断是不是这个参数不被接受。
+  async function listMyChats({ types = 'p2p,group', asUser } = {}) {
+    const options = userOpts(asUser);
+    const items = [];
+    let pageToken;
+    for (let page = 0; page < 20; page += 1) {
+      const data = await call(() => client.im.chat.list({
+        params: {
+          user_id_type: 'open_id',
+          sort_type: 'ByCreateTimeAsc',
+          page_size: 20,
+          types,
+          ...(pageToken ? { page_token: pageToken } : {}),
+        },
+      }, options), 'listMyChats');
+      items.push(...(data?.items ?? []));
+      if (!data?.has_more || !data?.page_token) break;
+      pageToken = data.page_token;
+    }
+    return items;
+  }
+
+  // 已知对方 open_id，换取与他的单聊 chat_id：查过 SDK 类型定义（node_modules/@larksuiteoapi/node-sdk/
+  // types/index.d.ts 里 im.chat 的全部方法：get/list/search/create/update/delete/link 等），
+  // create 只能建群（data 里没有「对端 open_id」这种字段，chat_mode 也只是未加约束的 string），
+  // list 的文档原文还写明「获取到的群列表中，不包含单聊」——即飞书没有「已知 open_id 直接换/建单聊
+  // chat_id」的接口。不要瞎编端点，只能提示调用方换路子。
+  async function resolveP2pChat(peerOpenId, { asUser } = {}) {
+    void peerOpenId;
+    void asUser;
+    throw new Error('resolveP2pChat 失败：飞书没有提供该能力，请改用 listMyChats 或从历史消息里取 chat_id');
+  }
+
+  return {
+    getTenantToken, sendText, sendCard, sendFile, sendImage, download, listMessages, forward,
+    listMyChats, resolveP2pChat,
+  };
 }
