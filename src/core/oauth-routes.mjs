@@ -11,13 +11,18 @@ import { randomBytes } from 'node:crypto';
 const STATE_KEY = 'oauth_pending_state';
 const STATE_TTL_MS = 10 * 60_000;
 
-// 用户身份要用到的 scope。没有 offline_access 就拿不到 refresh_token，令牌两小时后即死。
+// 用户身份要用到的 scope。
+// **offline_access 缺了就拿不到 refresh_token**，令牌两小时后即死、每两小时要人工扫一次码。
+// **im:message.send_as_user 是唯一的写权限**：回传要以主人本人的名义发就必须有它。
+// 只想做只读归档（回传由机器人转达）的话，把它从这个列表里删掉，
+// 出站会自动降级成机器人发并在正文前加转达前缀——功能不断，只是落款不同。
 export const DEFAULT_USER_SCOPES = [
   'im:message:readonly',
   'im:message.p2p_msg:get_as_user',
   'im:message.group_msg:get_as_user',
   'im:chat:read',
   'contact:user.base:readonly',
+  'im:message.send_as_user',
   'offline_access',
 ];
 

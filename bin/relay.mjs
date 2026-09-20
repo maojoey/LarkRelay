@@ -16,6 +16,8 @@ const USAGE = `用法：relay <子命令> [选项]
   msg <message_id>                       单条详情（含附件）
   route <relay_message_id>               查转发映射
   reconcile                              手动跑一次对账
+  auth                                   拿用户身份授权链接（收别人私聊你本人的消息要用）
+  archive                                手动跑一次用户身份归档
 
   --to 可写 teacher 或 ou_ 开头的 open_id。
 
@@ -84,6 +86,25 @@ const CMDS = {
       `出站       排队 ${h.outbox.queued} / 失败 ${h.outbox.failed} / 已发 ${h.outbox.sent}`,
       `磁盘可用   ${(h.disk.free_bytes / 1024 ** 3).toFixed(1)} GB`,
     ];
+    const u = h.user_identity ?? {};
+    if (u.authorized) {
+      lines.push(`用户身份   已授权，${u.reauth_due_in_days} 天后需重新授权`
+        + `（令牌 ${ago(u.last_refresh_at)}刷新）`);
+    } else if (u.reason === 'never_authorized') {
+      lines.push('用户身份   ⚠ 尚未授权——别人私聊你本人的消息收不到，跑 relay auth 开始授权');
+    } else if (u.reason === 'disabled') {
+      lines.push('用户身份   未启用');
+    } else {
+      lines.push(`用户身份   ⚠ 已失效（${u.dead ?? '未知'}）——跑 relay auth 重新授权`);
+    }
+    const a = h.archive ?? {};
+    lines.push(`归档线     ${ago(a.last_at)}，${a.chats ?? 0} 个会话`
+      + (a.failed_chats ? `，${a.failed_chats} 个读不了` : '')
+      + (a.fail_streak ? `，连续失败 ${a.fail_streak} 次` : ''));
+    if (u.reauth_warning) {
+      lines.push(`⚠ 距离官方的 365 天硬顶只剩 ${u.reauth_due_in_days} 天，到期必须人工重新授权一次`);
+    }
+    if (a.last_error) lines.push(`⚠ 归档最近一次错误：${a.last_error}`);
     if (h.split_suspect) {
       lines.push('⚠ 疑似有第二个消费者在抢同一应用的事件——检查别处是否跑了 lark-cli event consume');
     }
@@ -151,6 +172,28 @@ const CMDS = {
       `  回传给   ${r.origin_open_id}（${r.origin_kind}${r.line ? ` · ${r.line}` : ''}）`,
       `  登记于   ${ts(r.created_at)}`,
     ].join('\n') + '\n');
+  },
+
+  // 发起用户身份授权。令牌只在服务器上持有和刷新——refresh_token 一次性，
+  // 本机再存一份会把服务器那份顶废，所以这里只负责把链接打出来。
+  async auth(env) {
+    const r = await call(env, 'POST', '/api/oauth/start', {});
+    process.stdout.write([
+      '在浏览器里打开下面这个链接，用**你本人**的飞书账号点同意：',
+      '',
+      `  ${r.url}`,
+      '',
+      `链接 ${Math.round(r.expires_in_sec / 60)} 分钟内有效。同意之后回来跑 relay health 确认。`,
+      '注意：换成别人的账号点同意会被拒绝（服务端会核对 open_id）。',
+    ].join('\n') + '\n');
+  },
+
+  async archive(env) {
+    const r = await call(env, 'POST', '/api/archive', {});
+    if (r.error) fail(`归档失败：${r.error}`);
+    process.stdout.write(`归档完成：${r.chats} 个会话，扫了 ${r.scanned} 条，补录 ${r.missed} 条`
+      + (r.failed ? `，${r.failed} 个会话读不了` : '')
+      + `（会话发现方式：${r.mode ?? '未知'}）\n`);
   },
 
   async reconcile(env) {

@@ -39,6 +39,8 @@ describe('授权发起', () => {
     // 没有 offline_access 就拿不到 refresh_token，令牌两小时后就死
     assert.ok(scope.includes('offline_access'));
     assert.ok(scope.includes('im:message.p2p_msg:get_as_user'));
+    // 回传要以主人本人名义发就必须有这个写权限，漏了会在上线当天才发现
+    assert.ok(scope.includes('im:message.send_as_user'));
     assert.deepEqual(routes.scopes, DEFAULT_USER_SCOPES);
   });
 
