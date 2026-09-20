@@ -1,0 +1,21 @@
+{
+  "app_id": "cli_REPLACE_ME",
+  "transport": "ws",
+  "teacher_open_id": "ou_xxxxxxxxxxxxxxxxxxxx",
+  "teacher_name": "Owner",
+  "http": { "host": "127.0.0.1", "port": 8310 },
+  "paths": {
+    "db": "/data/larkrelay/db/relay.sqlite",
+    "files": "/data/larkrelay/files",
+    "outgoing": "/data/larkrelay/outgoing"
+  },
+  "limits": {
+    "max_download_mb": 100,
+    "files_soft_quota_gb": 10,
+    "files_hard_quota_gb": 15,
+    "min_free_gb": 2
+  },
+  "reconcile": { "interval_sec": 300, "overlap_sec": 600 },
+  "watchdog": { "disconnected_exit_sec": 180, "alert_cooldown_sec": 3600 },
+  "webhook": { "path": "/lark/events" }
+}

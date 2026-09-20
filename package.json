@@ -1,0 +1,18 @@
+{
+  "name": "larkrelay",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "飞书消息中转机器人：收私聊/群@ → 落库 → 转发给老师 → 老师回复即回传",
+  "engines": {
+    "node": ">=22.5"
+  },
+  "scripts": {
+    "start": "node src/index.mjs",
+    "test": "node --test",
+    "relay": "node bin/relay.mjs"
+  },
+  "dependencies": {
+    "@larksuiteoapi/node-sdk": "^1.73.0"
+  }
+}

@@ -1,0 +1,30 @@
+# LarkRelay —— webhook 模式专用片段。
+#
+# 里程碑 1（长连接 ws）不启用，不要贴进 Caddyfile。只有切到 webhook 模式
+# （config.json 里 transport 改成 "webhook"）才需要这段。
+#
+# 切换前务必：
+#   1. `caddy validate --config /path/to/Caddyfile`（贴进正式 Caddyfile 之后先验证语法）
+#   2. 确认日志文件已存在且属主正确，否则 Caddy 起不来或悄悄不写日志：
+#        touch /var/log/caddy/lark.example.com.log && chown caddy:caddy /var/log/caddy/lark.example.com.log
+#      （踩过这个坑：日志文件不存在或属主不对，systemd 管的 Caddy 不会自己建好权限）
+#   3. 用 systemctl reload caddy（而不是 restart），减少切换期间的连接中断
+#
+# 只放行 /lark/events，其余一律 404，不反代整站。
+
+lark.example.com {
+	handle /lark/events {
+		reverse_proxy 127.0.0.1:8310
+	}
+
+	handle {
+		respond 404
+	}
+
+	log {
+		output file /var/log/caddy/lark.example.com.log {
+			roll_size 10mb
+			roll_keep 5
+		}
+	}
+}
