@@ -3,7 +3,10 @@
   "transport": "ws",
   "teacher_open_id": "ou_xxxxxxxxxxxxxxxxxxxx",
   "teacher_name": "Owner",
-  "http": { "host": "127.0.0.1", "port": 8310 },
+  "http": {
+    "host": "127.0.0.1",
+    "port": 8310
+  },
   "paths": {
     "db": "/data/larkrelay/db/relay.sqlite",
     "files": "/data/larkrelay/files",
@@ -15,7 +18,22 @@
     "files_hard_quota_gb": 15,
     "min_free_gb": 2
   },
-  "reconcile": { "interval_sec": 300, "overlap_sec": 600 },
-  "watchdog": { "disconnected_exit_sec": 180, "alert_cooldown_sec": 3600 },
-  "webhook": { "path": "/lark/events" }
+  "reconcile": {
+    "interval_sec": 300,
+    "overlap_sec": 600
+  },
+  "watchdog": {
+    "disconnected_exit_sec": 180,
+    "alert_cooldown_sec": 3600
+  },
+  "webhook": {
+    "path": "/lark/events"
+  },
+  "oauth": {
+    "redirect_uri": "https://example.com/lark/oauth/callback",
+    "callback_path": "/lark/oauth/callback"
+  },
+  "archive": {
+    "interval_sec": 300
+  }
 }

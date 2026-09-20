@@ -5,16 +5,19 @@ import path from 'node:path';
 
 const GB = 1024 ** 3;
 
-export function createHttp({ config, log, health, db, outbox, files, api, reconcile, webhookHandler }) {
+export function createHttp({ config, log, health, db, outbox, files, api, reconcile, webhookHandler, userToken, oauthRoutes, archiver }) {
   const token = config.secrets.admin_token;
 
   async function healthz() {
     const s = health.get();
     const c = db.counts();
     const free = await files.freeBytes();
+    const ut = userToken ? userToken.status() : null;
     const ok = s.wsState !== 'failed'
       && s.pollFailStreak < 3
-      && free > (config.limits.min_free_gb ?? 2) * GB;
+      && free > (config.limits.min_free_gb ?? 2) * GB
+      // 从没授权过不算病（还没到那一步）；授权过又死了才算——那是在静默漏数据
+      && !(ut && ut.reason !== 'never_authorized' && !ut.authorized);
     return {
       ok,
       version: config.version,
@@ -29,6 +32,15 @@ export function createHttp({ config, log, health, db, outbox, files, api, reconc
       queue: c.messages,
       outbox: c.outbox,
       disk: { free_bytes: free },
+      // 用户身份那条线：机器人看不到的消息全靠它，令牌一断就是静默漏数据
+      user_identity: userToken ? userToken.status() : { authorized: false, reason: 'disabled' },
+      archive: {
+        last_at: s.archiveLastAt,
+        chats: s.archiveChats,
+        failed_chats: s.archiveFailed,
+        fail_streak: s.archiveFailStreak,
+        last_error: s.archiveLastError,
+      },
       uptime_ms: Date.now() - s.startedAt,
     };
   }
@@ -77,6 +89,15 @@ export function createHttp({ config, log, health, db, outbox, files, api, reconc
       };
     },
     'POST /api/reconcile': async () => reconcile.safeOnce(),
+    'POST /api/archive': async () => {
+      if (!archiver) throw new Error('归档线未启用');
+      return archiver.safeOnce();
+    },
+    // 只有带 admin token 的主人能发起授权，回调那侧再校验 state 与 open_id
+    'POST /api/oauth/start': async () => {
+      if (!oauthRoutes) throw new Error('未配置 oauth');
+      return oauthRoutes.start();
+    },
   };
 
   const server = createServer(async (req, res) => {
@@ -88,6 +109,21 @@ export function createHttp({ config, log, health, db, outbox, files, api, reconc
 
     try {
       if (webhookHandler && url.pathname === config.webhook.path) return webhookHandler(req, res);
+
+      // 授权回调：飞书重定向过来，带不了 Bearer，所以必须免鉴权。
+      // 安全性靠 oauth-routes 里的三道校验（state 一次性、必须先 start、open_id 必须是主人）。
+      if (oauthRoutes && url.pathname === (config.oauth?.callback_path ?? '/lark/oauth/callback')) {
+        const q = Object.fromEntries(url.searchParams);
+        try {
+          const r = await oauthRoutes.callback(q);
+          res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+          return res.end(`<meta charset="utf-8"><h3>授权成功</h3><p>${escapeHtml(r.name ?? '')}，可以关掉这个页面了。</p>`);
+        } catch (e) {
+          log.warn('授权回调失败', { err: e.message });
+          res.writeHead(400, { 'content-type': 'text/html; charset=utf-8' });
+          return res.end(`<meta charset="utf-8"><h3>授权失败</h3><p>${escapeHtml(e.message)}</p>`);
+        }
+      }
 
       if (url.pathname === '/healthz') {
         const h = await healthz();
@@ -125,4 +161,9 @@ export function createHttp({ config, log, health, db, outbox, files, api, reconc
     listen: () => new Promise((r) => server.listen(config.http.port, config.http.host, r)),
     close: () => new Promise((r) => server.close(r)),
   };
+}
+
+// 回调页面会把错误原文显示出来，转义一下免得反射型注入
+function escapeHtml(x) {
+  return String(x).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }

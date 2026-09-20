@@ -4,7 +4,7 @@ import { writeFile } from 'node:fs/promises';
 export function createFakeApi({ log } = {}) {
   const calls = [];
   const failures = new Map(); // method -> Error，触发一次就消费掉
-  const state = { seq: 0, downloadContent: 'fake', inbox: [], chats: [] };
+  const state = { seq: 0, downloadContent: 'fake', inbox: [], chats: [], userInfo: { openId: 'ou_owner', name: 'Owner' } };
 
   function record(method, args) {
     calls.push({ method, args });
@@ -97,6 +97,12 @@ export function createFakeApi({ log } = {}) {
     return `oc_fake_${String(peerOpenId).slice(-6)}`;
   }
 
+  async function getUserInfo(opts = {}) {
+    record('getUserInfo', [opts]);
+    maybeFail('getUserInfo');
+    return state.userInfo;
+  }
+
   function reset() {
     calls.length = 0;
     failures.clear();
@@ -125,9 +131,12 @@ export function createFakeApi({ log } = {}) {
     listMyChats,
     resolveP2pChat,
     resolveP2pChats,
+    getUserInfo,
     // 测试用检查面：download 的假内容、listMessages/listMyChats 的预置数据，都可直接读写。
     get downloadContent() { return state.downloadContent; },
     set downloadContent(v) { state.downloadContent = v; },
+    get userInfo() { return state.userInfo; },
+    set userInfo(v) { state.userInfo = v; },
     get inbox() { return state.inbox; },
     set inbox(v) { state.inbox = v; },
     get chats() { return state.chats; },
