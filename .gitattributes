@@ -1,0 +1,7 @@
+# 本机 core.autocrlf=true：不锁住这几个文件的话，下次 checkout 会被转成 CRLF，
+# 上传到远端后 `sh xxx.sh` 会因为行尾多出 \r 直接炸（bad interpreter / 参数解析错）。
+deploy/*.sh text eol=lf
+
+# .ps1 必须带 UTF-8 BOM：Windows 自带的 PowerShell 5.1 对无 BOM 的 UTF-8 按 ANSI 解，
+# 中文注释会碎成语法错误（实测 pack.ps1 报 UnexpectedToken）。别让 git 碰它们的字节。
+scripts/*.ps1 -text
