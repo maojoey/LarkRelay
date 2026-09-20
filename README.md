@@ -92,7 +92,7 @@ star 过百的 50 个，翻下来只有三类东西：
 │                                   core/outbox（幂等 + 退避重试）│
 │                                                              │
 │  http：/healthz、/api/*（Bearer）、/lark/events（webhook 时）、│
-│       /lark/oauth/callback（授权回调，唯一免鉴权的公开路径）    │
+│       /lark/oauth/callback（授权回调，可选；默认不对外开放）    │
 │  watchdog：该重启就 exit(1)，交给 Docker 拉起                  │
 └──────────────────────────────────────────────────────────────┘
         │ 数据卷：config / db / files / outgoing
