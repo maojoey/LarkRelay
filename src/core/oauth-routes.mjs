@@ -1,6 +1,11 @@
-// 用户身份授权的两个 HTTP 端点。
+// 用户身份授权。
 //
-// 回调地址**必须公开可达**（飞书要能重定向到它），所以它是整个服务唯一对外开的口。
+// **默认不需要对公网开任何口。** 授权码在浏览器跳转时就明文躺在地址栏里，所以重定向地址
+// 可以登记成 http://localhost:<port>/... —— 跳转落到操作者自己的机器上（没东西监听、
+// 浏览器报个错都无所谓），把地址栏整条粘回来即可（complete）。全程没有第三方碰得到授权码，
+// 而且授权码没有 app_secret 也换不出令牌。
+//
+// 想要自动化的话再把 callback 挂到公网（那就是唯一对外的口）；两条路共用同一套校验。
 // 三道校验缺一不可，否则任何人都能用自己的账号走完流程、把主人的令牌顶掉：
 //   1. 必须先由主人（带 admin token）调 start 起一个流程，才会生成 state
 //   2. 回调里的 state 必须命中且未过期，用完即删（一次性）
@@ -50,7 +55,22 @@ export function createOAuthRoutes({ db, oauth, api, userToken, config, log }) {
     } catch { return null; }
   }
 
-  /** 飞书回调：拿授权码换令牌并落盘。返回给浏览器看的一句话。 */
+  /**
+   * 从粘回来的整条跳转地址里把授权码抠出来，走同一套校验。
+   * 这是默认路径：不需要公网回调，操作者自己复制地址栏即可。
+   */
+  async function complete({ callback_url: callbackUrl, code, state }) {
+    if (callbackUrl) {
+      let u;
+      try { u = new URL(callbackUrl); } catch { throw new Error('这不是一条完整的地址，请把浏览器地址栏整条复制过来'); }
+      const q = Object.fromEntries(u.searchParams);
+      if (!q.code && !q.error) throw new Error('这条地址里没有授权码，确认是同意之后跳转到的那一条');
+      return callback(q);
+    }
+    return callback({ code, state });
+  }
+
+  /** 换令牌并落盘。公网回调与粘贴地址两条路都走这里。 */
   async function callback({ code, state, error }) {
     if (error) throw new Error(`授权被拒绝：${error}`);
     if (!code) throw new Error('回调里没有授权码');
@@ -75,7 +95,7 @@ export function createOAuthRoutes({ db, oauth, api, userToken, config, log }) {
     return { ok: true, name: who.name };
   }
 
-  return { start, callback, scopes };
+  return { start, callback, complete, scopes };
 }
 
 // 日志里不打完整 open_id：它不是密钥，但也没必要全量落进日志和备份

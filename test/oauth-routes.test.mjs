@@ -105,6 +105,44 @@ describe('授权回调的三道校验', () => {
     await assert.rejects(() => r.routes.callback({ state: stateOf(url) }), /授权码/);
   });
 
+  test('粘贴整条跳转地址也能完成授权（默认路径，不需要公网回调）', async () => {
+    const { url } = r.routes.start();
+    const st = stateOf(url);
+    const pasted = `http://localhost:8310/lark/oauth/callback?code=code_9&state=${st}`;
+    const res = await r.routes.complete({ callback_url: pasted });
+    assert.equal(res.ok, true);
+    assert.equal(r.saved[0].accessToken, 'uat_new');
+  });
+
+  test('粘的不是地址 / 地址里没授权码 → 说人话', async () => {
+    r.routes.start();
+    await assert.rejects(() => r.routes.complete({ callback_url: '我随便打了几个字' }), /完整的地址/);
+    r.routes.start();
+    await assert.rejects(
+      () => r.routes.complete({ callback_url: 'http://localhost:8310/lark/oauth/callback' }),
+      /没有授权码/,
+    );
+  });
+
+  test('粘贴路径同样过三道校验：state 伪造要被拒', async () => {
+    r.routes.start();
+    await assert.rejects(
+      () => r.routes.complete({ callback_url: 'http://localhost:8310/cb?code=c&state=forged' }),
+      /state/,
+    );
+    assert.equal(r.saved.length, 0);
+  });
+
+  test('粘贴路径同样核对身份：别人的账号要被拒', async () => {
+    r.api.userInfo = { openId: 'ou_someone_else', name: '路人' };
+    const { url } = r.routes.start();
+    await assert.rejects(
+      () => r.routes.complete({ callback_url: `http://localhost:8310/cb?code=c&state=${stateOf(url)}` }),
+      /不是同一个人/,
+    );
+    assert.equal(r.saved.length, 0);
+  });
+
   test('没配主人 open_id 时不做身份校验（但会照常落盘）', async () => {
     const r2 = rig({ ownerId: undefined });
     r2.api.userInfo = { openId: 'ou_anyone', name: '谁都行' };

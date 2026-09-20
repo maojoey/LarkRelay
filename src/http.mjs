@@ -98,6 +98,11 @@ export function createHttp({ config, log, health, db, outbox, files, api, reconc
       if (!oauthRoutes) throw new Error('未配置 oauth');
       return oauthRoutes.start();
     },
+    // 默认路径：操作者把浏览器地址栏整条粘回来，不需要公网回调
+    'POST /api/oauth/complete': async (req) => {
+      if (!oauthRoutes) throw new Error('未配置 oauth');
+      return oauthRoutes.complete(await readJson(req));
+    },
   };
 
   const server = createServer(async (req, res) => {

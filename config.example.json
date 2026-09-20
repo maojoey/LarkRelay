@@ -30,8 +30,9 @@
     "path": "/lark/events"
   },
   "oauth": {
-    "redirect_uri": "https://example.com/lark/oauth/callback",
-    "callback_path": "/lark/oauth/callback"
+    "redirect_uri": "http://localhost:8310/lark/oauth/callback",
+    "callback_path": "/lark/oauth/callback",
+    "_comment": "redirect_uri 登记成 localhost 即可，不需要公网可达：授权后把浏览器地址栏整条粘给 relay auth --callback-url。想自动化再改成公网地址并把 callback_path 挂到反向代理。"
   },
   "archive": {
     "interval_sec": 300

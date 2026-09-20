@@ -17,6 +17,7 @@ const USAGE = `用法：relay <子命令> [选项]
   route <relay_message_id>               查转发映射
   reconcile                              手动跑一次对账
   auth                                   拿用户身份授权链接（收别人私聊你本人的消息要用）
+  auth --callback-url "<地址>"            同意之后把浏览器地址栏整条粘回来，完成授权
   archive                                手动跑一次用户身份归档
 
   --to 可写 teacher 或 ou_ 开头的 open_id。
@@ -176,14 +177,27 @@ const CMDS = {
 
   // 发起用户身份授权。令牌只在服务器上持有和刷新——refresh_token 一次性，
   // 本机再存一份会把服务器那份顶废，所以这里只负责把链接打出来。
-  async auth(env) {
+  async auth(env, { values }) {
+    // 第二步：把浏览器地址栏整条粘回来
+    if (values['callback-url']) {
+      const r = await call(env, 'POST', '/api/oauth/complete', { callback_url: values['callback-url'] });
+      process.stdout.write(`授权成功${r.name ? `（${r.name}）` : ''}。跑 relay health 看看用户身份那行。
+`);
+      return;
+    }
     const r = await call(env, 'POST', '/api/oauth/start', {});
     process.stdout.write([
       '在浏览器里打开下面这个链接，用**你本人**的飞书账号点同意：',
       '',
       `  ${r.url}`,
       '',
-      `链接 ${Math.round(r.expires_in_sec / 60)} 分钟内有效。同意之后回来跑 relay health 确认。`,
+      `链接 ${Math.round(r.expires_in_sec / 60)} 分钟内有效。`,
+      '',
+      '点完同意，浏览器会跳到你登记的重定向地址。那个地址**不需要能打开**——',
+      '页面报错也没关系，授权码就在地址栏里。把地址栏**整条**复制下来，再跑：',
+      '',
+      '  relay auth --callback-url "<粘在这里>"',
+      '',
       '注意：换成别人的账号点同意会被拒绝（服务端会核对 open_id）。',
     ].join('\n') + '\n');
   },
@@ -213,6 +227,7 @@ const { values, positionals } = parseArgs({
     'text-file': { type: 'string' },
     path: { type: 'string' },
     'as-image': { type: 'boolean' },
+    'callback-url': { type: 'string' },
     since: { type: 'string' },
     limit: { type: 'string' },
     help: { type: 'boolean', short: 'h' },
