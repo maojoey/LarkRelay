@@ -164,17 +164,22 @@ export function openDb(path) {
   // 用户身份枚举出来的会话不知道机器人在不在，所以它不传；只有机器人自己的事件或
   // 机器人自己的会话列表才有资格置 1。
   const upsertChatStmt = db.prepare(`
-    INSERT INTO chats (chat_id, chat_type, peer_open_id, last_msg_at, bot_member)
-    VALUES (?,?,?,?,COALESCE(?,0))
+    INSERT INTO chats (chat_id, chat_type, peer_open_id, last_msg_at, bot_member, name)
+    VALUES (?,?,?,?,COALESCE(?,0),?)
     ON CONFLICT(chat_id) DO UPDATE SET
       chat_type = excluded.chat_type,
       peer_open_id = COALESCE(excluded.peer_open_id, chats.peer_open_id),
       last_msg_at = COALESCE(excluded.last_msg_at, chats.last_msg_at),
-      bot_member = COALESCE(?, chats.bot_member)
+      bot_member = COALESCE(?, chats.bot_member),
+      name = COALESCE(excluded.name, chats.name)
   `);
-  function upsertChat({ chatId, chatType, peerOpenId, lastMsgAt, botMember }) {
+  function upsertChat({ chatId, chatType, peerOpenId, lastMsgAt, botMember, name }) {
     const bm = botMember === undefined ? null : (botMember ? 1 : 0);
-    upsertChatStmt.run(chatId, chatType, peerOpenId ?? null, lastMsgAt ?? null, bm, bm);
+    upsertChatStmt.run(chatId, chatType, peerOpenId ?? null, lastMsgAt ?? null, bm, name ?? null, bm);
+  }
+
+  function getChat(chatId) {
+    return db.prepare('SELECT * FROM chats WHERE chat_id = ?').get(chatId);
   }
 
   /** 机器人确实在里面、因而拿机器人身份读得了的会话。对账只该碰这些。 */
@@ -267,14 +272,16 @@ export function openDb(path) {
   function addRoute(route) {
     db.prepare(`
       INSERT INTO routes (
-        relay_message_id, origin_message_id, origin_chat_id, origin_open_id, origin_kind, line, created_at
-      ) VALUES (?,?,?,?,?,?,?)
+        relay_message_id, origin_message_id, origin_chat_id, origin_open_id,
+        origin_kind, origin_chat_type, line, created_at
+      ) VALUES (?,?,?,?,?,?,?,?)
     `).run(
       route.relay_message_id,
       route.origin_message_id,
       route.origin_chat_id,
       route.origin_open_id,
       route.origin_kind,
+      route.origin_chat_type ?? null,
       route.line ?? null,
       route.created_at ?? Date.now(),
     );
@@ -320,6 +327,7 @@ export function openDb(path) {
     setPollCursor,
     listPollableChats,
     listBotChats,
+    getChat,
     addAttachment,
     updateAttachment,
     listAttachments,
