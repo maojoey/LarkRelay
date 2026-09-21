@@ -253,6 +253,17 @@ export function createApi({ appId, appSecret, log }) {
     return out;
   }
 
+  // 拿机器人自己的 open_id。群里只转 @ 了它的消息，要靠这个比对 mentions。
+  // **机器人的 open_id 也是按应用隔离的**，换应用就变，所以只能问飞书要，不能写死在配置里。
+  // 端点是 v3 的老接口，SDK 类型里没有，用 client.request 直接打；纯查询。
+  async function getBotInfo() {
+    const data = await call(() => client.request({
+      method: 'GET',
+      url: '/open-apis/bot/v3/info',
+    }), 'getBotInfo');
+    return { openId: data?.bot?.open_id ?? data?.open_id ?? null, name: data?.bot?.app_name ?? null };
+  }
+
   // 拿「当前这个用户令牌属于谁」。授权回调里用它做身份校验：
   // 回调地址必须公开可达，不校验的话任何人都能用自己的账号走完流程、把主人的令牌顶掉。
   async function getUserInfo({ asUser }) {
@@ -267,7 +278,7 @@ export function createApi({ appId, appSecret, log }) {
     (await resolveP2pChats([peerOpenId], opts))[peerOpenId] ?? null;
 
   return {
-    getTenantToken, sendText, sendCard, sendFile, sendImage, download, listMessages, forward,
+    getTenantToken, getBotInfo, sendText, sendCard, sendFile, sendImage, download, listMessages, forward,
     listMyChats, resolveP2pChat, resolveP2pChats, getUserInfo,
   };
 }

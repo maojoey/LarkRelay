@@ -7,6 +7,22 @@
 export function createHandleEvent({ db, config, log, wake }) {
   const teacherId = config.teacher_open_id;
 
+  /**
+   * 群里没有直接 @ 机器人的消息：**照常入库，但不转发**（用户 2026-09-21 定）。
+   *
+   * 判断放在这里而不是 worker：mentions 是 normalize 的产物，messages 表没有这一列，
+   * worker 从库里捞行时已经看不见了——和 attachments / ignore 同理。
+   *
+   * 认不出自己（拿不到机器人 open_id）时**退回照转**：多推一张卡片只是吵，
+   * 把真的 @ 静默吞掉是丢消息。
+   */
+  function groupNotForMe(msg) {
+    if (msg.chat_type !== 'group') return false;
+    const botId = config.bot_open_id ?? db.getKv('bot_open_id');
+    if (!botId) return false;
+    return !(msg.mentions ?? []).some((m) => m?.open_id === botId);
+  }
+
   return function handleEvent(msg) {
     if (!msg?.message_id) {
       log.warn('丢弃无 message_id 的事件', { transport: msg?.transport });
@@ -15,7 +31,8 @@ export function createHandleEvent({ db, config, log, wake }) {
 
     const ignored = msg.ignore === true
       || (msg.sender_type && msg.sender_type !== 'user')
-      || msg.msg_type === 'interactive';   // 机器人自己发的卡片会回流
+      || msg.msg_type === 'interactive'    // 机器人自己发的卡片会回流
+      || groupNotForMe(msg);
 
     const { dup } = db.insertInbound({ ...msg, status: ignored ? 'ignored' : 'new' });
     if (dup) return { dup: true };
