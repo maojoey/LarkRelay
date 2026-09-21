@@ -46,6 +46,12 @@ function extractText(msgType, obj, mentions) {
       }).join(''))
       .join('\n');
   }
+  // 视频会议开始/结束是一条没有正文的消息（只有 topic / meet_number / 起止时间）。
+  // 不给它造一句话，转发出去就是一张「（空消息）」卡片——2026-09-21 群里真这么刷了三张。
+  if (msgType === 'video_chat') {
+    const topic = typeof obj.topic === 'string' ? obj.topic.trim() : '';
+    return topic ? `发起了视频会议：${topic}` : '发起了视频会议';
+  }
   return null;
 }
 

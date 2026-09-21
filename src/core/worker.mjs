@@ -178,6 +178,13 @@ export function createWorker({ db, api, files, outbox, router, config, log, comm
       return 'done';
     }
 
+    // 既没正文又没附件，转过去就是一张「（空消息）」卡片，对老师零信息量。
+    // 飞书随时会加新的 msg_type，未知类型都会落到这里——宁可不转，也不要拿空卡片刷屏。
+    if (!msg.text && attachments.length === 0) {
+      log.info('没正文也没附件，不转发', { messageId: msg.message_id, msgType: msg.msg_type });
+      return 'ignored';
+    }
+
     await forwardToTeacher(msg, attachments);
     return 'done';
   }
