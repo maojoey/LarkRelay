@@ -178,8 +178,11 @@ export function createApi({ appId, appSecret, log }) {
   }
 
   // 列出当前身份（应用或 asUser 指定的用户）所在的会话。
-  // types 官方文档未写明（文档只说返回结果不含单聊），但官方 CLI 实测会传 types=p2p,group；
-  // 这里原样透传，失败时靠 call() 把飞书的 code/msg 带出来，方便判断是不是这个参数不被接受。
+  //
+  // **types 里带 p2p 只有用户身份能用。** 机器人身份传了会被整个请求拒掉：
+  // code 232001「p2p only supported under UAT」——不是少返回单聊，是一条都不返回。
+  // 所以机器人身份调用时只传 group；机器人的单聊靠实时事件去标记。
+  // （官方文档只说「结果不含单聊」，没说传了会报错，这一条是实测出来的。）
   async function listMyChats({ types = 'p2p,group', asUser } = {}) {
     const options = userOpts(asUser);
     const items = [];

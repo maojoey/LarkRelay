@@ -15,7 +15,10 @@ export function createReconcile({ db, api, config, log, health, handleEvent }) {
   // 机器人自己的会话列表就是「它读得了哪些」的权威来源，比我们自己推断可靠
   async function refreshBotChats() {
     try {
-      for (const c of await api.listMyChats({ types: 'group,p2p' })) {
+      // **只能传 group。** 机器人身份传 types=p2p 会被整个请求拒掉
+      // （code 232001「p2p only supported under UAT」），一个会话都列不回来。
+      // 机器人的单聊靠实时事件标记（handleEvent 里置 bot_member=1），不靠这里列。
+      for (const c of await api.listMyChats({ types: 'group' })) {
         db.upsertChat({
           chatId: c.chat_id,
           chatType: c.chat_mode === 'p2p' ? 'p2p' : 'group',
