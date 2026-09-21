@@ -113,10 +113,8 @@ export async function boot({ env = process.env } = {}) {
     if (!config.bot_open_id) {
       try {
         const bot = await api.getBotInfo();
-        if (bot.openId) {
-          db.setKv('bot_open_id', bot.openId);
-          log.info('已确认机器人自己的 open_id', { name: bot.name });
-        }
+        db.setKv('bot_open_id', bot.openId);
+        log.info('已确认机器人自己的 open_id', { name: bot.name });
       } catch (e) {
         log.warn('拿不到机器人自己的 open_id，群消息过滤沿用上一次的结果', { err: e.message });
       }
