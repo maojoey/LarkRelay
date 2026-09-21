@@ -230,16 +230,22 @@ notepad "$dir\secrets.json"
 
 **这是纯粹的便利性取舍**：省掉一次复制粘贴，换来一个对外开放的路径。校验逻辑两条路完全一样。
 
-### 5.2 发起授权
+### 5.2 发起授权：在飞书对话里做（推荐）
 
-```powershell
-ssh larkrelay-host "docker compose -f /opt/larkrelay/current/deploy/docker-compose.yml exec larkrelay node bin/relay.mjs auth"
-```
+现在推荐的做法是**全程在飞书对话里完成**，不用登服务器——授权提醒本来就是在手机上看到的，
+手边通常没有终端：
 
-会打印一个链接。**用你本人的飞书账号**在浏览器里打开、点「同意」。
-换别人的账号点同意会被拒绝——服务端会核对 `open_id`。
+1. 在你和机器人的私聊窗口里发「**授权**」两个字（`重新授权` / `auth` / `reauth` 也认），
+   机器人会回一条消息，里面直接带一条可点的授权链接（**30 分钟内有效**，过期了再发一次
+   「授权」拿新的一条）。
+2. **用你本人的飞书账号**打开链接、点「同意」。换别人的账号点同意会被拒绝——服务端会核对
+   `open_id`。
 
-### 5.2b 把地址栏粘回来（走 5.1 默认做法时）
+这条通道**只认主人本人、只认与机器人的私聊、只认这两种消息形状**：单独一句「授权」类的词，
+或者一条含 `code=` 的回调链接（见 5.2b）。别人在别处贴一模一样的指令词或链接，什么都不会
+发生。
+
+### 5.2b 把地址栏粘回来
 
 点完同意，浏览器会跳到 `oauth.redirect_uri`。**那个地址打不开是正常的**，
 授权码就在地址栏里。把地址栏**整条**复制下来：
@@ -248,15 +254,25 @@ ssh larkrelay-host "docker compose -f /opt/larkrelay/current/deploy/docker-compo
 http://localhost:8310/lark/oauth/callback?code=一串字符&state=另一串字符
 ```
 
-然后：
+**直接把这条地址粘回刚才那个对话**，机器人自己完成授权，回一条「授权成功」，就完成了。
+
+（若走 5.1b 把回调接到了公网，这一步自动完成，不需要手动粘。）
+
+### 5.2c 命令行做法（仍然可用，适合脚本化或没有聊天上下文时）
+
+```powershell
+ssh larkrelay-host "docker compose -f /opt/larkrelay/current/deploy/docker-compose.yml exec larkrelay node bin/relay.mjs auth"
+```
+
+会打印一个链接，同样**用你本人的飞书账号**打开、点「同意」。跳转后把地址栏整条复制下来，
+这次不粘进对话，改用：
 
 ```powershell
 ssh larkrelay-host "docker compose -f /opt/larkrelay/current/deploy/docker-compose.yml exec larkrelay node bin/relay.mjs auth --callback-url '<粘在这里>'"
 ```
 
-看到「授权成功」就完成了。
-
-（若走 5.1b 把回调接到了公网，这一步自动完成，页面会直接显示「授权成功」。）
+看到「授权成功」就完成了。两条路径（对话里粘 / 命令行传 `--callback-url`）走的是同一套
+服务端校验，选哪条纯看手边有没有终端。
 
 ### 5.3 验证
 
@@ -267,15 +283,18 @@ ssh larkrelay-host "docker compose -f /opt/larkrelay/current/deploy/docker-compo
 看到「用户身份　已授权，NNN 天后需重新授权」就是通了；也可以直接看 `/healthz` 里
 `user_identity.authorized` 是不是 `true`。
 
-## 用户身份的三条限制
+## 用户身份的四条限制
 
 启用第 5 步之前先知道，都是官方接口的限制，不是本项目能绕过的（细节见
-[README.md](../README.md)「用户身份的三条限制」）：
+[README.md](../README.md)「用户身份的四条限制」）：
 
 1. **365 天硬顶**：满 365 天必须重新走一遍第 5 步，刷新再勤也推不掉。
 2. **令牌只能有一个持有者**：`refresh_token` 一次性，不要在别的地方对同一份授权再刷新一次。
 3. **单聊会话可能枚举不到**：官方接口不保证列出单聊，本项目会自动降级为按联系人解析，
    降级后只覆盖已知的人。
+4. **首次归档要回溯一段历史，回溯太久会被截断**：用的是 `archive.backfill_days`
+   （默认 30 天），不是补断线漏消息用的 `overlap_sec`；单会话历史翻页上限 20 页 × 50 条
+   = 1000 条，回溯窗口别开得比这个上限还夸张。
 
 ## 出问题了看哪里
 
