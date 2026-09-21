@@ -32,8 +32,13 @@ async function loadEnv() {
   const cfgPath = process.env.RELAY_CONFIG ?? './config.json';
   const secPath = process.env.RELAY_SECRETS ?? './secrets.json';
   let cfg; let sec;
-  try { cfg = JSON.parse(await readFile(cfgPath, 'utf8')); } catch (e) { fail(`读不了配置 ${cfgPath}：${e.message}`); }
-  try { sec = JSON.parse(await readFile(secPath, 'utf8')); } catch (e) { fail(`读不了密钥 ${secPath}：${e.message}`); }
+  // 剥 BOM：Windows 的 PowerShell 写出来的 JSON 带 UTF-8 BOM，JSON.parse 见到就抛错
+  const readJson = async (path, what) => {
+    try { return JSON.parse((await readFile(path, 'utf8')).replace(/^﻿/, '')); }
+    catch (e) { fail(`读不了${what} ${path}：${e.message}`); return null; }
+  };
+  cfg = await readJson(cfgPath, '配置');
+  sec = await readJson(secPath, '密钥');
   if (!sec.admin_token) fail('secrets.admin_token 为空');
   return { base: `http://${cfg.http?.host ?? '127.0.0.1'}:${cfg.http?.port ?? 8310}`, token: sec.admin_token };
 }

@@ -87,7 +87,16 @@ export function createOAuthRoutes({ db, oauth, api, userToken, config, log }) {
     const who = await api.getUserInfo({ asUser: tokens.accessToken });
     if (config.teacher_open_id && who.openId !== config.teacher_open_id) {
       log?.error('授权账号与配置的主人不符，已拒绝', { got: mask(who.openId) });
-      throw new Error('授权账号与配置里的主人不是同一个人，已拒绝');
+      // 把看到的 open_id 原样回给调用方（这条路径要 admin token，不是公开的）。
+      // **最常见的原因不是「授权错了账号」，而是 open_id 按应用隔离**：
+      // 同一个人在每个应用下的 open_id 都不同，从别的应用抄来的值在这里必然对不上。
+      // 不把实际值报出来的话，这个错根本没法自查——踩过一次，别再省这一句。
+      throw new Error(
+        `授权账号与配置里的主人不是同一个人，已拒绝。`
+        + `配置里写的是 ${config.teacher_open_id}，实际授权的是 ${who.openId}。`
+        + `注意 open_id 是**按应用隔离**的：同一个人在不同应用下 open_id 不同，`
+        + `不能从别的应用抄。确认是本人的话，把 config.teacher_open_id 改成上面这个实际值。`,
+      );
     }
 
     userToken.saveInitial(tokens);
