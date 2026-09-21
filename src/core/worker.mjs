@@ -43,13 +43,20 @@ export function createWorker({ db, api, files, outbox, router, config, log, comm
   async function forwardToTeacher(msg, attachments) {
     const c = contactOf(msg.sender_open_id);
     const isTeacher = msg.sender_open_id === config.teacher_open_id;
-    const line = isTeacher ? 'self' : (c?.line ?? null);
-    const name = isTeacher ? `${teacherName}（自测）` : (c?.name ?? msg.sender_open_id ?? '未知');
+    const isGroup = msg.chat_type === 'group';
+    const line = isTeacher && !isGroup ? 'self' : (c?.line ?? null);
+    const who = isTeacher && !isGroup
+      ? `${teacherName}（自测）`
+      : (c?.name ?? msg.sender_open_id ?? '未知');
+    // 群里要写清是哪个群：私聊里堆着好几个群的转发，只写发言人根本分不出场合
+    const chatName = isGroup ? (db.getChat(msg.chat_id)?.name ?? null) : null;
+    const name = isGroup ? `${who} · 群「${chatName ?? '未命名'}」` : who;
     const origin = {
       origin_message_id: msg.message_id,
       origin_chat_id: msg.chat_id,
       origin_open_id: msg.sender_open_id,
-      origin_kind: isTeacher ? 'self' : (c?.role === 'student' ? 'student' : 'teacher'),
+      origin_kind: isTeacher && !isGroup ? 'self' : (c?.role === 'student' ? 'student' : 'teacher'),
+      origin_chat_type: msg.chat_type,
       line,
     };
 
@@ -79,12 +86,20 @@ export function createWorker({ db, api, files, outbox, router, config, log, comm
   // fallback_prefix 只在用户身份不可用、被迫降级成机器人发时才会被加上——
   // 那时候必须让对方看出这是转达，否则机器人说话会被当成本人说话。
   async function relayReply(msg, attachments, route) {
-    const target = { type: 'open_id', id: route.origin_open_id };
+    // **群里的问题要回到群里**，不能私聊单独回那个人——
+    // 本该一次讲清的共性问题，私聊回等于重复十几遍，而且别人看不到。
+    const isGroup = route.origin_chat_type === 'group';
+    const target = isGroup
+      ? { type: 'chat_id', id: route.origin_chat_id }
+      : { type: 'open_id', id: route.origin_open_id };
+    // 群里挂在原消息下面，大家看得出在回谁
+    const replyTo = isGroup ? route.origin_message_id : undefined;
     if (msg.text) {
       outbox.queue({
         target,
         msgType: 'text',
         payload: { text: msg.text, fallback_prefix: relayPrefix(route.origin_kind, teacherName) },
+        replyTo,
         purpose: 'relay_reply',
         identity: 'owner',
       });
@@ -99,6 +114,14 @@ export function createWorker({ db, api, files, outbox, router, config, log, comm
         identity: 'owner',
       });
     }
+    if (isGroup) {
+      outbox.queue({
+        target: teacher, msgType: 'text',
+        payload: { text: `已发到群「${db.getChat(route.origin_chat_id)?.name ?? '未命名'}」` },
+        replyTo: msg.message_id, purpose: 'receipt',
+      });
+      return;
+    }
     const who = contactOf(route.origin_open_id)?.name
       ?? (route.origin_kind === 'self' ? `${teacherName}（自测）` : route.origin_open_id);
     outbox.queue({
@@ -112,9 +135,14 @@ export function createWorker({ db, api, files, outbox, router, config, log, comm
 
   async function processOne(msg) {
     // 该忽略的（表情包、合并转发、系统消息、机器人自己的卡片、非 user 发件人）
-    // 在 handleEvent 就落成 ignored 了，claimNewMessages 捞不到。这里只兜住群消息：
-    // 里程碑 1 只做私聊，群要等学生分线落地再开。
-    if (msg.chat_type === 'group') return 'ignored';
+    // 在 handleEvent 就落成 ignored 了，claimNewMessages 捞不到。
+    //
+    // 群消息只转**实时收到的那些**——群里机器人默认只收得到 @ 了它的消息，
+    // 所以「实时来的」恰好等于「@ 了它的」。轮询拉回来的群历史只归档不转发，
+    // 否则群里每说一句都会推一张卡片过来。
+    if (msg.chat_type === 'group' && msg.transport !== 'ws' && msg.transport !== 'webhook') {
+      return 'ignored';
+    }
 
     const attachments = await fetchAttachments(msg.message_id);
 

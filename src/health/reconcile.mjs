@@ -21,6 +21,7 @@ export function createReconcile({ db, api, config, log, health, handleEvent }) {
           chatType: c.chat_mode === 'p2p' ? 'p2p' : 'group',
           peerOpenId: c.p2p_target_id ?? null,
           botMember: 1,
+          name: c.name ?? null,
         });
       }
     } catch (e) {

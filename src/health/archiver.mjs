@@ -22,8 +22,8 @@ export function createArchiver({ db, api, userToken, config, log, health, handle
   const ownerId = config.teacher_open_id;
 
   /** 把发现到的会话登记进 chats 表，之后由 pullChat 按游标拉。 */
-  function remember(chatId, chatType, peerOpenId, lastMsgAt) {
-    db.upsertChat({ chatId, chatType, peerOpenId: peerOpenId ?? null, lastMsgAt: lastMsgAt ?? null });
+  function remember(chatId, chatType, peerOpenId, lastMsgAt, name) {
+    db.upsertChat({ chatId, chatType, peerOpenId: peerOpenId ?? null, lastMsgAt: lastMsgAt ?? null, name: name ?? null });
   }
 
   /** 路线 A：直接列自己的会话。失败或列不出单聊都返回 null，交给调用方降级。 */
@@ -42,7 +42,7 @@ export function createArchiver({ db, api, userToken, config, log, health, handle
       return null;
     }
     for (const c of chats) {
-      remember(c.chat_id, c.chat_mode === 'p2p' ? 'p2p' : 'group', c.p2p_target_id ?? null);
+      remember(c.chat_id, c.chat_mode === 'p2p' ? 'p2p' : 'group', c.p2p_target_id ?? null, null, c.name ?? null);
     }
     return chats.map((c) => ({ chatId: c.chat_id, chatType: c.chat_mode === 'p2p' ? 'p2p' : 'group' }));
   }

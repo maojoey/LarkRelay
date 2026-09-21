@@ -149,3 +149,76 @@ describe('机器人身份的出站不受影响', () => {
     assert.equal(card.args[2].asUser, undefined);
   });
 });
+
+describe('群里 @ 机器人：转给主人，回复回到群里', () => {
+  let rig;
+  beforeEach(async () => { rig = await makeRig(); });
+
+  const groupMsg = (over = {}) => inbound({
+    message_id: 'om_g1', chat_id: 'oc_group', chat_type: 'group',
+    sender_open_id: PEER, text: '老师这个题目行吗', transport: 'ws', ...over,
+  });
+
+  test('实时收到的群消息会转成卡片，抬头写清是哪个群', async () => {
+    rig.db.upsertChat({ chatId: 'oc_group', chatType: 'group', name: '2027届本科毕业论文', botMember: 1 });
+    rig.db.upsertContact({ openId: PEER, name: '某同学', role: 'student' });
+    rig.handleEvent(groupMsg());
+    await rig.drain();
+    const card = sent(rig.api, 'sendCard')[0];
+    assert.ok(card, '群里 @ 它应该转发');
+    assert.match(card.args[1].header.title.content, /某同学/);
+    assert.match(card.args[1].header.title.content, /2027届本科毕业论文/, '不写群名就分不清场合');
+  });
+
+  test('**轮询拉回来的群历史只归档不转发**，否则群里每说一句都推一张卡', async () => {
+    rig.db.upsertChat({ chatId: 'oc_group', chatType: 'group', name: '某群', botMember: 1 });
+    rig.handleEvent(groupMsg({ message_id: 'om_g2', transport: 'poll' }));
+    await rig.drain();
+    assert.equal(sent(rig.api, 'sendCard').length, 0);
+    assert.equal(rig.db.getMessage('om_g2').status, 'ignored');
+  });
+
+  test('回复群消息的卡片 → 回到**群里**，并挂在原消息下面', async () => {
+    rig.db.upsertChat({ chatId: 'oc_group', chatType: 'group', name: '某群', botMember: 1 });
+    rig.db.upsertContact({ openId: PEER, name: '某同学', role: 'student' });
+    rig.handleEvent(groupMsg());
+    await rig.drain();
+    rig.api.calls.length = 0;
+
+    rig.handleEvent(inbound({ message_id: 'om_r1', text: '可以，收窄到某个行业', reply_to: 'om_fake_1' }));
+    await rig.drain();
+
+    const texts = sent(rig.api, 'sendText');
+    const toGroup = texts.find((c) => c.args[0].type === 'chat_id');
+    assert.ok(toGroup, '必须发回群里，不能私聊单独回——共性问题要一次讲清');
+    assert.equal(toGroup.args[0].id, 'oc_group');
+    assert.equal(toGroup.args[1], '可以，收窄到某个行业', '以本人名义发，不加转达前缀');
+    assert.equal(toGroup.args[2].replyTo, 'om_g1', '挂在原消息下面，大家看得出在回谁');
+    assert.equal(toGroup.args[2].asUser, 'uat_1');
+    // 不该同时私聊那个学生
+    assert.ok(!texts.some((c) => c.args[0].id === PEER), '不能又发群又私聊，会重复');
+  });
+
+  test('回执写明发到了哪个群', async () => {
+    rig.db.upsertChat({ chatId: 'oc_group', chatType: 'group', name: '2027届本科毕业论文', botMember: 1 });
+    rig.handleEvent(groupMsg());
+    await rig.drain();
+    rig.api.calls.length = 0;
+    rig.handleEvent(inbound({ message_id: 'om_r2', text: '好', reply_to: 'om_fake_1' }));
+    await rig.drain();
+    const receipt = sent(rig.api, 'sendText').find((c) => c.args[0].id === OWNER);
+    assert.match(receipt.args[1], /已发到群「2027届本科毕业论文」/);
+  });
+
+  test('私聊的回传不受影响，仍然发给本人', async () => {
+    rig.db.upsertContact({ openId: PEER, name: '某同学', role: 'student' });
+    rig.handleEvent(inbound({ message_id: 'om_p1', sender_open_id: PEER, text: '老师' }));
+    await rig.drain();
+    rig.api.calls.length = 0;
+    rig.handleEvent(inbound({ message_id: 'om_p2', text: '在', reply_to: 'om_fake_1' }));
+    await rig.drain();
+    const relay = sent(rig.api, 'sendText').find((c) => c.args[0].id === PEER);
+    assert.ok(relay);
+    assert.equal(relay.args[2].replyTo, undefined, '私聊不需要挂在原消息下');
+  });
+});

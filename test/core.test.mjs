@@ -239,10 +239,13 @@ describe('去重、忽略与重试', () => {
     assert.equal(rig.api.calls.length, 0);
   });
 
-  test('群消息在里程碑 1 里落 ignored', async () => {
-    rig.handleEvent(inbound({ message_id: 'om_g1', chat_type: 'group', chat_id: 'oc_group' }));
+  test('轮询拉回来的群历史只归档不转发', async () => {
+    // 群里机器人只收得到 @ 它的消息，所以「实时来的」才该转；
+    // 轮询拉回来的是群里所有人说的话，全转会把主人淹掉
+    rig.handleEvent(inbound({ message_id: 'om_g1', chat_type: 'group', chat_id: 'oc_group', transport: 'poll' }));
     await rig.drain();
     assert.equal(rig.db.getMessage('om_g1').status, 'ignored');
+    assert.equal(sent(rig.api, 'sendCard').length, 0);
   });
 
   test('出站失败会退避重试，达到上限才定格 failed', async () => {
