@@ -62,7 +62,7 @@ export async function boot({ env = process.env } = {}) {
     target: { type: 'open_id', id: config.teacher_open_id },
     msgType: 'text', payload: { text }, purpose: 'alert',
   });
-  const watchdog = createWatchdog({ config, log, health, notify });
+  const watchdog = createWatchdog({ config, log, health, notify, userToken });
 
   const transport = config.live
     ? (config.transport === 'webhook'

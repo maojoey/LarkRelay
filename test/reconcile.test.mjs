@@ -167,3 +167,63 @@ describe('看门狗', () => {
     assert.equal(await w.check(), true);
   });
 });
+
+describe('看门狗：会静默漏数据的那两条必须主动提醒', () => {
+  const mkUt = (st) => ({ status: () => st });
+
+  test('用户令牌失效 → 发提醒，且说清楚漏的是哪半边', async () => {
+    const sent = [];
+    const w = createWatchdog({
+      config: {}, log: silent, health: fakeHealth(), notify: async (t) => sent.push(t),
+      userToken: mkUt({ authorized: false, dead: 'invalid_grant', reason: 'dead' }),
+    });
+    await w.check();
+    assert.equal(sent.length, 1);
+    assert.match(sent[0], /用户身份已失效/);
+    assert.match(sent[0], /私聊你本人/, '要讲清楚漏的是哪部分，不能只说「失效了」');
+    assert.match(sent[0], /relay auth/, '要给出怎么恢复');
+  });
+
+  test('从没授权过不算故障，不打扰', async () => {
+    const sent = [];
+    const w = createWatchdog({
+      config: {}, log: silent, health: fakeHealth(), notify: async (t) => sent.push(t),
+      userToken: mkUt({ authorized: false, reason: 'never_authorized' }),
+    });
+    await w.check();
+    assert.equal(sent.length, 0);
+  });
+
+  test('临近 365 天硬顶 → 提前提醒并给出天数', async () => {
+    const sent = [];
+    const w = createWatchdog({
+      config: {}, log: silent, health: fakeHealth(), notify: async (t) => sent.push(t),
+      userToken: mkUt({ authorized: true, reauth_warning: true, reauth_due_in_days: 12 }),
+    });
+    await w.check();
+    assert.match(sent[0], /12 天/);
+    assert.match(sent[0], /静默停止归档/, '要说清不处理的后果');
+  });
+
+  test('归档连续失败 → 提醒', async () => {
+    const sent = [];
+    const h = fakeHealth({ archiveFailStreak: 4, archiveLastError: '读不动' });
+    const w = createWatchdog({ config: {}, log: silent, health: h, notify: async (t) => sent.push(t) });
+    await w.check();
+    assert.match(sent[0], /归档线连续失败 4 次/);
+  });
+
+  test('各类告警冷却互不干扰——连接告警不能把令牌告警压掉', async () => {
+    const sent = [];
+    const h = fakeHealth({ wsState: 'failed' });
+    const w = createWatchdog({
+      config: {}, log: silent, health: h, notify: async (t) => sent.push(t),
+      userToken: mkUt({ authorized: false, dead: 'invalid_grant', reason: 'dead' }),
+    });
+    await w.check();
+    // 一次 check 里两种告警都该发出来，不能因为共用一个冷却只发一条
+    assert.equal(sent.length, 2, `应有连接与令牌两条，实际 ${sent.length} 条`);
+    assert.ok(sent.some((x) => /长连接/.test(x)));
+    assert.ok(sent.some((x) => /用户身份已失效/.test(x)));
+  });
+});
