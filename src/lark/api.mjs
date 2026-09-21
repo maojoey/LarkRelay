@@ -12,6 +12,24 @@ const FILE_TYPE_BY_EXT = {
   '.opus': 'opus',
 };
 
+/**
+ * 把飞书真正说了什么抠出来。
+ * SDK 抛的是 AxiosError，`e.message` 只有「Request failed with status code 400」，
+ * 真正的原因在 `e.response.data` 里（code / msg，有时还有 ext= 写着确切症结）。
+ * **只说 400 等于没说**——排查时得再跑一遍脚本去捞，被这个坑了三次才补。
+ * 注意只取这三个字段：整个 error 对象里带着请求体，那里面有 app_secret。
+ */
+export function describeError(e) {
+  const d = e?.response?.data;
+  if (!d) return e?.message ?? String(e);
+  const parts = [];
+  if (d.code !== undefined) parts.push(`code=${d.code}`);
+  if (d.msg) parts.push(`msg=${d.msg}`);
+  const ext = d.error?.ext ?? d.ext;
+  if (ext) parts.push(`ext=${ext}`);
+  return parts.length ? parts.join(' ') : (e.message ?? String(e));
+}
+
 function fileTypeFor(localPath) {
   return FILE_TYPE_BY_EXT[extname(localPath).toLowerCase()] ?? 'stream';
 }
@@ -35,14 +53,15 @@ export function createApi({ appId, appSecret, log }) {
     return res.data;
   }
 
-  // 网络/协议层异常：只透传 e.message（字符串，不含 secret），不把整个 error 对象序列化出去。
+  // 网络/协议层异常：只透传提炼过的字符串（不含 secret），不把整个 error 对象序列化出去。
   async function call(fn, label) {
     let res;
     try {
       res = await fn();
     } catch (e) {
-      log?.error('lark api 请求异常', { label, message: e.message });
-      throw new Error(`${label} 失败：${e.message}`);
+      const why = describeError(e);
+      log?.error('lark api 请求异常', { label, why });
+      throw new Error(`${label} 失败：${why}`);
     }
     return unwrap(res, label);
   }
@@ -54,8 +73,9 @@ export function createApi({ appId, appSecret, log }) {
     try {
       res = await fn();
     } catch (e) {
-      log?.error('lark api 请求异常', { label, message: e.message });
-      throw new Error(`${label} 失败：${e.message}`);
+      const why = describeError(e);
+      log?.error('lark api 请求异常', { label, why });
+      throw new Error(`${label} 失败：${why}`);
     }
     if (!res || !res[keyName]) {
       log?.error('lark api 上传返回空', { label });
@@ -133,8 +153,9 @@ export function createApi({ appId, appSecret, log }) {
         path: { message_id: messageId, file_key: fileKey },
       }, userOpts(asUser));
     } catch (e) {
-      log?.error('lark api 请求异常', { label: 'download', message: e.message });
-      throw new Error(`download 失败：${e.message}`);
+      const why = describeError(e);
+      log?.error('lark api 请求异常', { label: 'download', why });
+      throw new Error(`download 失败：${why}`);
     }
     await res.writeFile(destPath);
     const { size } = statSync(destPath);
