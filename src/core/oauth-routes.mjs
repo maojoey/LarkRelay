@@ -14,7 +14,9 @@
 import { randomBytes } from 'node:crypto';
 
 const STATE_KEY = 'oauth_pending_state';
-const STATE_TTL_MS = 10 * 60_000;
+// 30 分钟：提醒是异步看到的（手机上过一会儿才点），10 分钟经常不够，
+// 过期又要重来一轮。state 本身泄漏无用——没有对应的授权码换不出令牌。
+const STATE_TTL_MS = 30 * 60_000;
 
 // 用户身份要用到的 scope。
 // **offline_access 缺了就拿不到 refresh_token**，令牌两小时后即死、每两小时要人工扫一次码。

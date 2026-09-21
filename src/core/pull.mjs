@@ -13,9 +13,16 @@ export function createPull({ db, api, log, handleEvent }) {
    * 窗口刻意重叠：飞书的 create_time 与我们收到的时刻不完全对齐，卡死边界会漏掉临界那条。
    * @returns {{ scanned:number, missed:number }} missed = 真正补录进来的**用户**消息条数
    */
-  async function pullChat({ chatId, chatType = 'p2p', asUser, now = Date.now(), overlapMs = 600_000, transport = 'poll' }) {
+  async function pullChat({
+    chatId, chatType = 'p2p', asUser, now = Date.now(),
+    overlapMs = 600_000, backfillMs, transport = 'poll',
+  }) {
     const saved = Number(db.getKv(cursorKey(chatId)) ?? 0);
-    const start = saved > 0 ? saved - overlapMs : now - overlapMs;
+    // **首次见到这个会话时要回溯一段历史，不能只拉重叠窗口。**
+    // overlap 是为「补断线漏掉的那几条」设计的（十分钟量级）；
+    // 拿它当首次归档的起点，结果就是刚上线时只收进最近十分钟，历史全空。
+    // 这两种用途混用过一次，账面上看着「成功了 16 个会话」，其实 13 个是 0 条。
+    const start = saved > 0 ? saved - overlapMs : now - (backfillMs ?? overlapMs);
 
     const items = await api.listMessages(chatId, start, now, { asUser });
     let missed = 0;

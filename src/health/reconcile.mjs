@@ -8,6 +8,8 @@ import { createPull } from '../core/pull.mjs';
 
 export function createReconcile({ db, api, config, log, health, handleEvent }) {
   const pull = createPull({ db, api, log, handleEvent });
+  // 首次见到会话同样回溯（理由同 archiver）：服务刚上线时机器人所在的群也该收进历史
+  const backfillMs = (config.archive?.backfill_days ?? 30) * 86_400_000;
   const overlapMs = (config.reconcile?.overlap_sec ?? 600) * 1000;
 
   async function once({ now = Date.now() } = {}) {
@@ -19,7 +21,7 @@ export function createReconcile({ db, api, config, log, health, handleEvent }) {
     // 游标推进、出站记账慢慢漂移——那种不一致最难查。
     for (const chat of chats) {
       const r = await pull.pullChat({
-        chatId: chat.chat_id, chatType: chat.chat_type, now, overlapMs, transport: 'poll',
+        chatId: chat.chat_id, chatType: chat.chat_type, now, overlapMs, backfillMs, transport: 'poll',
       });
       scanned += r.scanned;
       missed += r.missed;

@@ -14,7 +14,7 @@ const COOLDOWN = {
   archive: 6 * HOUR,
 };
 
-export function createWatchdog({ config, log, health, notify, userToken, exit = (c) => process.exit(c) }) {
+export function createWatchdog({ config, log, health, notify, userToken, authLink, exit = (c) => process.exit(c) }) {
   const wd = config.watchdog ?? {};
   const disconnectedExitMs = (wd.disconnected_exit_sec ?? 180) * 1000;
   const defaultCooldownMs = (wd.alert_cooldown_sec ?? 3600) * 1000;
@@ -42,15 +42,33 @@ export function createWatchdog({ config, log, health, notify, userToken, exit = 
     if (!u.authorized || u.dead) {
       await alert('user_token_dead',
         `⚠ 用户身份已失效（${u.dead ?? '未知原因'}）。`
-        + `现在「别人私聊你本人」的消息**不再被归档**，机器人那半边不受影响。`
-        + `跑 relay auth 重新授权即可恢复。`, { now });
+        + '现在「别人私聊你本人」的消息**不再被归档**，机器人这半边不受影响。\n'
+        + howToFix(), { now });
       return;
     }
     if (u.reauth_warning) {
       await alert('reauth_due',
-        `提醒：用户身份授权还有 ${u.reauth_due_in_days} 天到期（飞书规定满 365 天必须人工重新授权一次，`
-        + `刷新再勤也推不掉）。到期前跑一次 relay auth 就行；不处理的话到期当天会静默停止归档。`, { now });
+        `提醒：用户身份授权还有 ${u.reauth_due_in_days} 天到期`
+        + `（飞书规定满 365 天必须人工重新授权一次，刷新再勤也推不掉）。`
+        + '不处理的话到期当天会**静默**停止归档。\n' + howToFix(), { now });
     }
+  }
+
+  // 提醒必须自带解法。只说「去服务器敲个命令」等于没提醒——
+  // 人是在手机上看到这条的，手边没有终端。所以直接把链接放进去，整套在对话里闭环。
+  function howToFix() {
+    try {
+      const l = authLink?.();
+      if (l?.url) {
+        return `\n用你本人的账号打开下面这条链接点同意（${Math.round(l.expires_in_sec / 60)} 分钟内有效）：\n\n`
+          + `${l.url}\n\n`
+          + '同意后浏览器会跳到一个打不开的地址，那是正常的——把**地址栏整条**复制、'
+          + '直接发回这个对话即可，我来完成剩下的。';
+      }
+    } catch (e) {
+      log.warn('生成授权链接失败', { err: e.message });
+    }
+    return '\n在这个对话里发「授权」两个字，我会给你一条授权链接。';
   }
 
   async function checkArchive(now, s) {

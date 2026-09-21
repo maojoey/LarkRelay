@@ -181,7 +181,8 @@ describe('看门狗：会静默漏数据的那两条必须主动提醒', () => {
     assert.equal(sent.length, 1);
     assert.match(sent[0], /用户身份已失效/);
     assert.match(sent[0], /私聊你本人/, '要讲清楚漏的是哪部分，不能只说「失效了」');
-    assert.match(sent[0], /relay auth/, '要给出怎么恢复');
+    // 提醒必须自带解法，而且是**在手机上就能走完**的解法，不能让人去找终端
+    assert.match(sent[0], /发「授权」|https?:\/\//, '要给出能直接走的恢复路径');
   });
 
   test('从没授权过不算故障，不打扰', async () => {
@@ -202,7 +203,8 @@ describe('看门狗：会静默漏数据的那两条必须主动提醒', () => {
     });
     await w.check();
     assert.match(sent[0], /12 天/);
-    assert.match(sent[0], /静默停止归档/, '要说清不处理的后果');
+    assert.match(sent[0], /静默.{0,4}停止归档/, '要说清不处理的后果');
+    assert.match(sent[0], /发「授权」|https?:\/\//, '要给出能直接走的恢复路径');
   });
 
   test('归档连续失败 → 提醒', async () => {
@@ -225,5 +227,33 @@ describe('看门狗：会静默漏数据的那两条必须主动提醒', () => {
     assert.equal(sent.length, 2, `应有连接与令牌两条，实际 ${sent.length} 条`);
     assert.ok(sent.some((x) => /长连接/.test(x)));
     assert.ok(sent.some((x) => /用户身份已失效/.test(x)));
+  });
+});
+
+describe('提醒自带授权链接', () => {
+  const mkUt = (st) => ({ status: () => st });
+
+  test('能生成链接时，提醒里直接放链接', async () => {
+    const sent = [];
+    const w = createWatchdog({
+      config: {}, log: silent, health: fakeHealth(), notify: async (t) => sent.push(t),
+      userToken: mkUt({ authorized: false, dead: 'invalid_grant', reason: 'dead' }),
+      authLink: () => ({ url: 'https://accounts.example/authorize?x=1', expires_in_sec: 1800 }),
+    });
+    await w.check();
+    assert.match(sent[0], /https:\/\/accounts\.example\/authorize/);
+    assert.match(sent[0], /30 分钟内有效/);
+    assert.match(sent[0], /地址栏整条/, '要说清同意之后该怎么做');
+  });
+
+  test('生成链接失败也要给出退路，不能只说「失效了」', async () => {
+    const sent = [];
+    const w = createWatchdog({
+      config: {}, log: silent, health: fakeHealth(), notify: async (t) => sent.push(t),
+      userToken: mkUt({ authorized: false, dead: 'x', reason: 'dead' }),
+      authLink: () => { throw new Error('没配 redirect_uri'); },
+    });
+    await w.check();
+    assert.match(sent[0], /发「授权」两个字/);
   });
 });
