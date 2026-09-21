@@ -38,6 +38,9 @@ export function createHandleEvent({ db, config, log, wake }) {
       chatType: msg.chat_type,
       peerOpenId: msg.chat_type === 'p2p' ? msg.sender_open_id : null,
       lastMsgAt: msg.create_time,
+      // 实时事件只可能来自机器人所在的会话，所以能置 1；
+      // 但 poll 来源不行——那可能是用户身份拉到的、机器人根本进不去的会话。
+      botMember: (msg.transport === 'ws' || msg.transport === 'webhook') ? 1 : undefined,
     });
 
     if (!ignored) wake?.();

@@ -12,8 +12,29 @@ export function createReconcile({ db, api, config, log, health, handleEvent }) {
   const backfillMs = (config.archive?.backfill_days ?? 30) * 86_400_000;
   const overlapMs = (config.reconcile?.overlap_sec ?? 600) * 1000;
 
+  // 机器人自己的会话列表就是「它读得了哪些」的权威来源，比我们自己推断可靠
+  async function refreshBotChats() {
+    try {
+      for (const c of await api.listMyChats({ types: 'group,p2p' })) {
+        db.upsertChat({
+          chatId: c.chat_id,
+          chatType: c.chat_mode === 'p2p' ? 'p2p' : 'group',
+          peerOpenId: c.p2p_target_id ?? null,
+          botMember: 1,
+        });
+      }
+    } catch (e) {
+      // 列不出来不影响这一轮：已知的那些照拉
+      log?.warn('刷新机器人会话列表失败', { err: e.message });
+    }
+  }
+
   async function once({ now = Date.now() } = {}) {
-    const chats = db.listPollableChats();
+    // **只拉机器人自己在的会话。** 会话表是两条线共用的，里面还有用户身份枚举出来的、
+    // 机器人根本进不去的单聊——拿机器人身份去拉那些必然 400，而且会连续失败。
+    // 每轮先按机器人自己的会话列表刷新一次归属，新进的群立刻纳入、退出的自动淡出。
+    await refreshBotChats();
+    const chats = db.listBotChats();
     let missed = 0;
     let scanned = 0;
 
@@ -30,7 +51,7 @@ export function createReconcile({ db, api, config, log, health, handleEvent }) {
     const s = health.get();
     // ws 一直是 connected 却仍漏了用户消息 → 多半有第二个消费者在抢事件
     const splitSuspect = missed > 0 && s.wsState === 'connected';
-    health.set({ lastPollAt: now, pollFailStreak: 0, splitSuspect: splitSuspect || s.splitSuspect });
+    health.set({ lastPollAt: now, pollFailStreak: 0, pollLastError: null, splitSuspect: splitSuspect || s.splitSuspect });
     health.addMissed(missed);
     if (missed > 0) {
       log.warn('对账补录了漏掉的消息', { missed, scanned, splitSuspect });
@@ -43,7 +64,7 @@ export function createReconcile({ db, api, config, log, health, handleEvent }) {
       return await once();
     } catch (e) {
       const streak = health.get().pollFailStreak + 1;
-      health.set({ pollFailStreak: streak });
+      health.set({ pollFailStreak: streak, pollLastError: e.message });
       log.error('对账失败', { streak, err: e.message });
       return { error: e.message, streak };
     }

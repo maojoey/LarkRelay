@@ -46,7 +46,8 @@ function rig({ health } = {}) {
     db, api, config, log: silent, health: h,
     handleEvent: (m) => { got.push(m); db.insertInbound(m); return { dup: false }; },
   });
-  db.upsertChat({ chatId: 'oc_p2p', chatType: 'p2p', peerOpenId: TEACHER });
+  // 机器人自己的会话列表 —— 对账每轮会据此刷新「哪些是它读得了的」
+  api.chats = [{ chat_id: 'oc_p2p', chat_mode: 'p2p', p2p_target_id: TEACHER }];
   return { db, api, health: h, reconcile, got, config };
 }
 
@@ -103,6 +104,37 @@ describe('对账轮询', () => {
     assert.equal(r.health.get().pollFailStreak, 1);
   });
 
+  // 2026-09-21 线上事故的回归：归档器用用户身份把老师的 16 个会话写进了会话表，
+  // 对账拿机器人身份去挨个拉 → 全部 400 → 连败 → 当时还会判死重启，成了重启循环。
+  test('机器人不在的会话绝不能被对账拉（会 400，而且当时会导致重启循环）', async () => {
+    // 用户身份枚举出来的会话：没有 botMember 标记
+    r.db.upsertChat({ chatId: 'oc_user_only_1', chatType: 'p2p', peerOpenId: 'ou_other' });
+    r.db.upsertChat({ chatId: 'oc_user_only_2', chatType: 'p2p', peerOpenId: 'ou_other2' });
+    await r.reconcile.once();
+    const pulled = r.api.calls.filter((c) => c.method === 'listMessages').map((c) => c.args[0]);
+    assert.deepEqual(pulled, ['oc_p2p'], '只该拉机器人自己在的那个');
+    assert.ok(!pulled.includes('oc_user_only_1'));
+  });
+
+  test('机器人新进一个群，下一轮对账就会纳入', async () => {
+    r.api.chats = [
+      { chat_id: 'oc_p2p', chat_mode: 'p2p', p2p_target_id: TEACHER },
+      { chat_id: 'oc_new_group', chat_mode: 'group' },
+    ];
+    await r.reconcile.once();
+    const pulled = r.api.calls.filter((c) => c.method === 'listMessages').map((c) => c.args[0]);
+    assert.ok(pulled.includes('oc_new_group'), '拉机器人自己的会话列表就是为了这个');
+  });
+
+  test('列不出机器人会话时不影响这一轮，已知的照拉', async () => {
+    await r.reconcile.once();          // 先跑一轮把 oc_p2p 标记上
+    r.api.calls.length = 0;
+    r.api.failNext('listMyChats', new Error('临时故障'));
+    const res = await r.reconcile.once();
+    assert.ok(!res.error);
+    assert.ok(r.api.calls.some((c) => c.method === 'listMessages'), '已知会话照拉');
+  });
+
   test('游标推进后下一轮只拉重叠窗口', async () => {
     await r.reconcile.once({ now: 1_000_000_000_000 });
     const before = r.api.calls.filter((c) => c.method === 'listMessages').length;
@@ -140,10 +172,13 @@ describe('看门狗', () => {
     assert.equal(await w.check({ now: t0 + 200_001 }), false, '重新开始计时');
   });
 
-  test('对账连续三次失败 → 判死', async () => {
-    const h = fakeHealth({ pollFailStreak: 3 });
-    const w = createWatchdog({ config: {}, log: silent, health: h, notify: async () => {} });
-    assert.equal(await w.check(), true);
+  test('对账连续失败**不判死**，只提醒——重启治不了接口 400', async () => {
+    const sent = [];
+    const h = fakeHealth({ pollFailStreak: 4, pollLastError: 'listMessages 失败：400' });
+    const w = createWatchdog({ config: {}, log: silent, health: h, notify: async (t) => sent.push(t) });
+    assert.equal(await w.check(), false, '重启一万次还是 400，只会变成重启循环');
+    assert.match(sent[0], /对账连续失败 4 次/);
+    assert.match(sent[0], /实时消息不受影响/, '要说清影响范围，别让人以为全挂了');
   });
 
   test('告警有冷却，不会刷屏', async () => {
