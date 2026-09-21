@@ -100,6 +100,8 @@ export function createOutbox({ db, api, files, log, userToken }) {
               origin_chat_id: o.origin_chat_id,
               origin_open_id: o.origin_open_id,
               origin_kind: o.origin_kind,
+              // 决定回传是发回群里还是私聊本人，漏了这个群消息会被当成私聊回
+              origin_chat_type: o.origin_chat_type ?? null,
               line: o.line ?? null,
             });
           }

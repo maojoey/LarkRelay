@@ -116,6 +116,13 @@ describe('对账轮询', () => {
     assert.ok(!pulled.includes('oc_user_only_1'));
   });
 
+  test('列机器人会话时**不能带 p2p**——带了整个请求会被拒，一条都列不回来', async () => {
+    await r.reconcile.once();
+    const call = r.api.calls.find((c) => c.method === 'listMyChats');
+    assert.ok(call, '每轮都该刷新一次机器人会话列表');
+    assert.equal(call.args[0].types, 'group', 'p2p 只有用户身份支持，机器人传了会 232001');
+  });
+
   test('机器人新进一个群，下一轮对账就会纳入', async () => {
     r.api.chats = [
       { chat_id: 'oc_p2p', chat_mode: 'p2p', p2p_target_id: TEACHER },

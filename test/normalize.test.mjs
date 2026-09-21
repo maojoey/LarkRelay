@@ -165,3 +165,22 @@ test('已经 normalize 过的对象：幂等，原样返回同一个引用', () 
   const twice = normalize(once, 'ws');
   assert.equal(twice, once);
 });
+
+// SDK 抛的是 AxiosError，e.message 只有「Request failed with status code 400」。
+// 真正的原因在 e.response.data 里。只说 400 等于没说——被这个坑了三次才补。
+test('错误信息要带出飞书真正说了什么', async () => {
+  const { describeError } = await import('../src/lark/api.mjs');
+  const e = Object.assign(new Error('Request failed with status code 400'), {
+    response: { data: { code: 232001, msg: 'invalid request parameter', error: { ext: 'p2p only supported under UAT' } } },
+    config: { data: JSON.stringify({ app_secret: 'TOPSECRET' }) },
+  });
+  const out = describeError(e);
+  assert.match(out, /code=232001/);
+  assert.match(out, /ext=p2p only supported under UAT/, 'ext 里往往写着确切症结，不能丢');
+  assert.ok(!out.includes('TOPSECRET'), '整个 error 对象带着请求体，里面有 app_secret，绝不能带出来');
+});
+
+test('没有响应体时退回原始 message，不要变成 undefined', async () => {
+  const { describeError } = await import('../src/lark/api.mjs');
+  assert.equal(describeError(new Error('ECONNRESET')), 'ECONNRESET');
+});
