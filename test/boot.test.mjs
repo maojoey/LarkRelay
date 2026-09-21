@@ -115,6 +115,61 @@ describe('真启动', () => {
     assert.match((await r.json()).error, /outgoing/);
   });
 
+  // 群聊只能用 chat_id 发。这里以前把收件人写死成 open_id，结果是群里一条也发不出去，
+  // 而且错误发生在飞书那头（400），本地看不出原因。
+  test('管理接口能发到群（oc_ 走 chat_id）', async () => {
+    const r = await fetch(`${base}/api/send`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ to: 'oc_group1', text: '发到群里' }),
+    });
+    assert.equal(r.status, 200);
+    await app.outbox.tick();
+    const call = app.api.calls.find((c) => c.method === 'sendText' && c.args[1] === '发到群里');
+    assert.ok(call, '应该真的发出去了');
+    assert.deepEqual(call.args[0], { type: 'chat_id', id: 'oc_group1' });
+  });
+
+  test('发文件也能发到群', async () => {
+    await writeFile(path.join(root, 'outgoing', 'a.txt'), 'hi');
+    const r = await fetch(`${base}/api/send-file`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ to: 'oc_group1', path: 'a.txt' }),
+    });
+    assert.equal(r.status, 200);
+    await app.outbox.tick();
+    const call = app.api.calls.find((c) => c.method === 'sendFile');
+    assert.ok(call);
+    assert.deepEqual(call.args[0], { type: 'chat_id', id: 'oc_group1' });
+  });
+
+  test('收件人形状不对要当场拒，不能排进队里去飞书那儿才报错', async () => {
+    const r = await fetch(`${base}/api/send`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ to: '张三', text: 'x' }),
+    });
+    assert.equal(r.status, 400);
+    assert.match((await r.json()).error, /open_id|chat_id/);
+  });
+
+  // identity 是白名单：写错字只会退回机器人，不会静默变成以主人名义发言
+  test('identity 只认 owner，其余一律按机器人', async () => {
+    const queue = async (identity) => {
+      const r = await fetch(`${base}/api/send`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ to: 'teacher', text: `身份 ${identity}`, identity }),
+      });
+      return (await r.json()).data.id;
+    };
+    const readIdentity = (id) => app.db.raw.prepare('SELECT identity FROM outbox WHERE id = ?').get(id).identity;
+    assert.equal(readIdentity(await queue('owner')), 'owner');
+    assert.equal(readIdentity(await queue('OWNER')), 'bot');
+    assert.equal(readIdentity(await queue(undefined)), 'bot');
+  });
+
   test('未知路径 404', async () => {
     assert.equal((await fetch(`${base}/nope`)).status, 404);
   });

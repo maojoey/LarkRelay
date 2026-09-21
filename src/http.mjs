@@ -53,6 +53,19 @@ export function createHttp({ config, log, health, db, outbox, files, api, reconc
     return abs;
   }
 
+  // 收件人三种写法：teacher、ou_ 开头的 open_id（单聊）、oc_ 开头的 chat_id（群 / 话题群）。
+  // **群必须走 chat_id**：receive_id_type 直接取 target.type，拿 open_id 去发群消息会被飞书整条拒掉。
+  function resolveTarget(to) {
+    const id = to === 'teacher' ? config.teacher_open_id : to;
+    if (!id) throw new Error('缺少收件人');
+    if (id.startsWith('oc_')) return { type: 'chat_id', id };
+    if (id.startsWith('ou_')) return { type: 'open_id', id };
+    throw new Error('收件人只能是 teacher、ou_ 开头的 open_id 或 oc_ 开头的 chat_id');
+  }
+
+  // 只认 'owner' 一个值。写错字不该静默变成以主人本人的名义发言，所以是白名单不是黑名单。
+  const identityOf = (v) => (v === 'owner' ? 'owner' : 'bot');
+
   async function readJson(req) {
     const chunks = [];
     for await (const c of req) {
@@ -69,22 +82,26 @@ export function createHttp({ config, log, health, db, outbox, files, api, reconc
     }),
     'POST /api/send': async (req) => {
       const b = await readJson(req);
-      const id = b.to === 'teacher' ? config.teacher_open_id : b.to;
-      if (!id) throw new Error('缺少收件人');
+      const target = resolveTarget(b.to);
       if (!b.text) throw new Error('缺少正文');
-      return { id: outbox.queue({ target: { type: 'open_id', id }, msgType: 'text', payload: { text: b.text }, purpose: 'manual' }) };
+      return {
+        id: outbox.queue({
+          target, msgType: 'text', payload: { text: b.text }, purpose: 'manual', identity: identityOf(b.identity),
+        }),
+      };
     },
     'POST /api/send-file': async (req) => {
       const b = await readJson(req);
-      const id = b.to === 'teacher' ? config.teacher_open_id : b.to;
+      const target = resolveTarget(b.to);
       const abs = resolveOutgoing(b.path ?? '');
       const rel = path.relative(path.resolve(config.paths.files), abs);
       return {
         id: outbox.queue({
-          target: { type: 'open_id', id },
+          target,
           msgType: b.as_image ? 'image' : 'file',
           payload: { path: rel, file_name: path.basename(abs) },
           purpose: 'manual',
+          identity: identityOf(b.identity),
         }),
       };
     },
