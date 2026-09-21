@@ -1,26 +1,95 @@
 // 看门狗。Docker 的 healthcheck 判 unhealthy **不会**自动重启容器，
 // 所以真正的重启决策在这里：该死就 exit(1)，交给 restart: unless-stopped 拉起来。
-export function createWatchdog({ config, log, health, notify, exit = (c) => process.exit(c) }) {
+const HOUR = 3600_000;
+const DAY = 24 * HOUR;
+
+// 按告警种类各自冷却。**不能共用一个冷却**：否则一条连接告警会把「用户身份失效」
+// 这种更要紧的提醒一起压掉，用户就永远收不到。
+const COOLDOWN = {
+  ws: HOUR,
+  poll: HOUR,
+  split: 6 * HOUR,
+  user_token_dead: 6 * HOUR,   // 已经坏了，每 6 小时提醒一次直到处理
+  reauth_due: DAY,             // 还没坏，每天提醒一次就够
+  archive: 6 * HOUR,
+};
+
+export function createWatchdog({ config, log, health, notify, userToken, authLink, exit = (c) => process.exit(c) }) {
   const wd = config.watchdog ?? {};
   const disconnectedExitMs = (wd.disconnected_exit_sec ?? 180) * 1000;
-  const cooldownMs = (wd.alert_cooldown_sec ?? 3600) * 1000;
+  const defaultCooldownMs = (wd.alert_cooldown_sec ?? 3600) * 1000;
   let disconnectedSince = null;
-  let lastAlertAt = 0;
+  const lastAlertAt = new Map();
 
-  async function alert(text) {
-    const now = Date.now();
-    if (now - lastAlertAt < cooldownMs) return;
-    lastAlertAt = now;
+  async function alert(kind, text, { now = Date.now() } = {}) {
+    const cd = COOLDOWN[kind] ?? defaultCooldownMs;
+    if (now - (lastAlertAt.get(kind) ?? 0) < cd) return false;
+    lastAlertAt.set(kind, now);
     // 告警发不出去不能阻塞退出——多半正是因为飞书连不上才要告警
-    try { await notify?.(text); } catch (e) { log.warn('告警发送失败', { err: e.message }); }
+    try { await notify?.(text); } catch (e) { log.warn('告警发送失败', { kind, err: e.message }); }
+    return true;
+  }
+
+  /**
+   * 用户身份的健康：**这条线坏了是静默的**——机器人照常收发，只有「别人私聊你本人」
+   * 那半边悄悄停了归档，看日志才发现。所以必须主动发消息提醒，不能只写日志。
+   */
+  async function checkUserIdentity(now) {
+    if (!userToken) return;
+    const u = userToken.status();
+    if (u.reason === 'never_authorized') return;   // 还没开始用，不算故障
+
+    if (!u.authorized || u.dead) {
+      await alert('user_token_dead',
+        `⚠ 用户身份已失效（${u.dead ?? '未知原因'}）。`
+        + '现在「别人私聊你本人」的消息**不再被归档**，机器人这半边不受影响。\n'
+        + howToFix(), { now });
+      return;
+    }
+    if (u.reauth_warning) {
+      await alert('reauth_due',
+        `提醒：用户身份授权还有 ${u.reauth_due_in_days} 天到期`
+        + `（飞书规定满 365 天必须人工重新授权一次，刷新再勤也推不掉）。`
+        + '不处理的话到期当天会**静默**停止归档。\n' + howToFix(), { now });
+    }
+  }
+
+  // 提醒必须自带解法。只说「去服务器敲个命令」等于没提醒——
+  // 人是在手机上看到这条的，手边没有终端。所以直接把链接放进去，整套在对话里闭环。
+  function howToFix() {
+    try {
+      const l = authLink?.();
+      if (l?.url) {
+        return `\n用你本人的账号打开下面这条链接点同意（${Math.round(l.expires_in_sec / 60)} 分钟内有效）：\n\n`
+          + `${l.url}\n\n`
+          + '同意后浏览器会跳到一个打不开的地址，那是正常的——把**地址栏整条**复制、'
+          + '直接发回这个对话即可，我来完成剩下的。';
+      }
+    } catch (e) {
+      log.warn('生成授权链接失败', { err: e.message });
+    }
+    return '\n在这个对话里发「授权」两个字，我会给你一条授权链接。';
+  }
+
+  async function checkArchive(now, s) {
+    if ((s.archiveFailStreak ?? 0) < 3) return;
+    await alert('archive',
+      `⚠ 归档线连续失败 ${s.archiveFailStreak} 次：${s.archiveLastError ?? '未知'}。`
+      + `「别人私聊你本人」的消息可能正在漏。`, { now });
   }
 
   // 返回该不该退出，便于测试；定时器版本见 start()
   async function check({ now = Date.now() } = {}) {
     const s = health.get();
 
+    // **必须放在所有判死分支之前。** 判死分支会 return，放后面的话
+    // 「连接挂了」会顺手把「用户身份失效」这类提醒一起压掉——而后者恰恰是静默的，
+    // 用户只能靠这条提醒知道。一个故障不该掩盖另一个通知。
+    await checkUserIdentity(now);
+    await checkArchive(now, s);
+
     if (s.wsState === 'failed') {
-      await alert('LarkRelay：长连接进入 failed，准备重启进程');
+      await alert('ws', 'LarkRelay：长连接进入 failed，准备重启进程', { now });
       log.error('看门狗判死：ws failed');
       return true;
     }
@@ -30,21 +99,21 @@ export function createWatchdog({ config, log, health, notify, exit = (c) => proc
     } else {
       disconnectedSince ??= now;
       if (now - disconnectedSince > disconnectedExitMs) {
-        await alert('LarkRelay：长连接持续断开超过阈值，准备重启进程');
+        await alert('ws', 'LarkRelay：长连接持续断开超过阈值，准备重启进程', { now });
         log.error('看门狗判死：ws 长时间未连上', { ms: now - disconnectedSince });
         return true;
       }
     }
 
     if (s.pollFailStreak >= 3) {
-      await alert('LarkRelay：对账连续 3 次失败，准备重启进程');
+      await alert('poll', 'LarkRelay：对账连续 3 次失败，准备重启进程', { now });
       log.error('看门狗判死：对账连续失败', { streak: s.pollFailStreak });
       return true;
     }
 
     if (s.splitSuspect) {
-      await alert('LarkRelay：长连接正常却仍在漏消息，疑似有第二个消费者在抢同一应用的事件。'
-        + '请检查有没有别处跑了 lark-cli event consume。');
+      await alert('split', 'LarkRelay：长连接正常却仍在漏消息，疑似有第二个消费者在抢同一应用的事件。'
+        + '请检查有没有别处跑了 lark-cli event consume。', { now });
     }
     return false;
   }

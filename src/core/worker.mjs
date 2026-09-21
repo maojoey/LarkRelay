@@ -7,7 +7,7 @@ import { forwardCard, relayPrefix } from './cards.mjs';
 
 const MAX_ATTEMPTS = 5;
 
-export function createWorker({ db, api, files, outbox, router, config, log }) {
+export function createWorker({ db, api, files, outbox, router, config, log, commands }) {
   const teacher = { type: 'open_id', id: config.teacher_open_id };
   const teacherName = config.teacher_name ?? 'Owner';
 
@@ -119,6 +119,21 @@ export function createWorker({ db, api, files, outbox, router, config, log }) {
     const attachments = await fetchAttachments(msg.message_id);
 
     const isTeacher = msg.sender_open_id === config.teacher_open_id;
+
+    // 主人的几条固定指令（目前只有重新授权那一组）先于转发判断。
+    // 放在 reply_to 分支之前：粘回来的授权地址常常是「回复」着提醒那条发的，
+    // 走到回传分支就会被当成要发给学生的正文。
+    if (isTeacher && commands) {
+      const handled = await commands.tryHandle(msg, { isOwner: true });
+      if (handled) {
+        outbox.queue({
+          target: teacher, msgType: 'text', payload: { text: handled.reply },
+          replyTo: msg.message_id, purpose: 'receipt',
+        });
+        return 'done';
+      }
+    }
+
     if (isTeacher && msg.reply_to) {
       const r = router.resolve(msg.reply_to);
       if (!r.ok) {

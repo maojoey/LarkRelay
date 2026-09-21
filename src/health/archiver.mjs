@@ -16,6 +16,9 @@ const DISCOVER_KEY = 'archiver_discovery_mode';
 export function createArchiver({ db, api, userToken, config, log, health, handleEvent }) {
   const pull = createPull({ db, api, log, handleEvent });
   const overlapMs = (config.reconcile?.overlap_sec ?? 600) * 1000;
+  // 首次见到一个会话时回溯多久。默认 30 天：够把「上线前就存在的对话」收进来，
+  // 又不至于一上来就把几年的历史全拉一遍（单会话分页上限 20×50=1000 条）。
+  const backfillMs = (config.archive?.backfill_days ?? 30) * 86_400_000;
   const ownerId = config.teacher_open_id;
 
   /** 把发现到的会话登记进 chats 表，之后由 pullChat 按游标拉。 */
@@ -79,7 +82,7 @@ export function createArchiver({ db, api, userToken, config, log, health, handle
     for (const c of chats) {
       try {
         const r = await pull.pullChat({
-          chatId: c.chatId, chatType: c.chatType, asUser, now, overlapMs, transport: 'poll',
+          chatId: c.chatId, chatType: c.chatType, asUser, now, overlapMs, backfillMs, transport: 'poll',
         });
         missed += r.missed; scanned += r.scanned;
       } catch (e) {
