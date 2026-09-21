@@ -5,8 +5,14 @@ import { readFileSync } from 'node:fs';
 const REQUIRED_SECRETS = ['app_secret', 'admin_token'];
 
 function readJSON(p, what) {
-  try { return JSON.parse(readFileSync(p, 'utf8')); }
-  catch (e) { throw new Error(`读不了${what}（${p}）：${e.message}`); }
+  try {
+    // 必须剥 BOM：Windows 的 PowerShell 用 `Set-Content -Encoding utf8` 写出来的 JSON 带 UTF-8 BOM，
+    // 而 JSON.parse 见到 BOM 直接抛错。配置和密钥经常是人手在 Windows 上生成的，
+    // 不容忍这一个字节，服务就会以「读不了密钥」启动失败，而文件肉眼看完全正常。
+    return JSON.parse(readFileSync(p, 'utf8').replace(/^﻿/, ''));
+  } catch (e) {
+    throw new Error(`读不了${what}（${p}）：${e.message}`);
+  }
 }
 
 export function loadConfig(env = process.env) {

@@ -240,3 +240,21 @@ test('upsertChat 与 poll_cursor', () => {
   assert.equal(chat.poll_cursor, 12345);
   assert.equal(chat.last_msg_at, 200);
 });
+
+// 配置/密钥常常是人手在 Windows 上用 PowerShell 生成的，`Set-Content -Encoding utf8` 会带 UTF-8 BOM，
+// 而 JSON.parse 见到 BOM 直接抛错——服务会以「读不了密钥」启动失败，文件却肉眼完全正常。
+// 2026-09-21 上线当天差点踩到，故钉一条。
+test('配置与密钥带 UTF-8 BOM 也要能读', async () => {
+  const { loadConfig } = await import('../src/config.mjs');
+  const { mkdtempSync, writeFileSync } = await import('node:fs');
+  const dir = mkdtempSync(join(tmpdir(), 'larkrelay-bom-'));
+  const cfg = {
+    app_id: 'cli_xxxxxxxx', transport: 'ws', teacher_open_id: 'ou_xxxxxxxx',
+    http: { host: '127.0.0.1', port: 8310 }, paths: {}, limits: {}, webhook: { path: '/x' },
+  };
+  writeFileSync(join(dir, 'c.json'), `﻿${JSON.stringify(cfg)}`, 'utf8');
+  writeFileSync(join(dir, 's.json'), `﻿${JSON.stringify({ app_secret: 'a', admin_token: 'b' })}`, 'utf8');
+  const loaded = loadConfig({ RELAY_CONFIG: join(dir, 'c.json'), RELAY_SECRETS: join(dir, 's.json') });
+  assert.equal(loaded.app_id, 'cli_xxxxxxxx');
+  assert.equal(loaded.secrets.admin_token, 'b');
+});
