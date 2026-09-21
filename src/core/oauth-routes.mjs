@@ -35,15 +35,19 @@ export const DEFAULT_USER_SCOPES = [
   'im:chat:read',
   'im:chat.members:read',
   'contact:user.base:readonly',
-  // 以本人名义发消息。
+  // 以本人名义发消息。**这两条必须一起给**，只给 send_as_user 发不出去
+  // （99991679，私聊群聊都一样，从上线到 2026-09-21 一次都没成功过）。
   //
-  // **别再往这里加 `im:message:send`。** 2026-09-21 加过一次，授权页当场挂掉
-  // （错误码 20027「当前应用权限不足」），连带谁都授权不了。
-  // 原因：飞书 99991679 的错误文案写的是「required one of these privileges under the
-  // user identity: [im:message:send, im:message, im:message:send_as_bot]」，
-  // 但这三个名字在开发者后台的**用户身份权限**下一条都搜不到——它们是应用身份权限。
-  // 错误文案里的名字不能直接当 scope 用，必须以后台「用户身份权限」列表里真实存在的为准。
+  // 飞书那句报错列了三个候选：[im:message:send, im:message, im:message:send_as_bot]，
+  // 但**只有 `im:message` 在后台的「用户身份权限」表里真实存在**（免审，名称
+  // 「获取与发送单聊、群组消息」），另外两个是应用身份权限。
+  // **别照错误文案抄名字**——加过 `im:message:send`，授权页当场 20027 挂掉，
+  // 连归档要用的那次重新授权都做不成。以后台列表为准，不以错误文案为准。
+  //
+  // 另注：后台勾选权限和这张表要**同时**做。只勾不申请拿不到；
+  // 只申请没勾就是 20027。改这里之前先确认后台已经开通并发布。
   'im:message.send_as_user',
+  'im:message',
   // 以本人名义建群与管群：这样建出来的群**群主直接就是本人**，不用事后转让
   'im:chat:create_by_user',
   'im:chat:update',
