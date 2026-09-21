@@ -115,14 +115,14 @@ star 过百的 50 个，翻下来只有三类东西：
 | [docs/SETUP.md](docs/SETUP.md) | 从零跑起来：飞书后台建应用、权限、部署、验收 |
 | [docs/OPERATIONS.md](docs/OPERATIONS.md) | 日常运维：部署、回滚、看日志、排错、切 webhook |
 | [docs/DECISIONS.md](docs/DECISIONS.md) | 为什么这么设计，以及为什么不用现成项目 |
-| [docs/PITFALLS.md](docs/PITFALLS.md) | 开发中真实踩到的七个坑，每个都带根因与防法 |
+| [docs/PITFALLS.md](docs/PITFALLS.md) | 开发中真实踩到的九个坑，每个都带根因与防法 |
 | [CHANGELOG.md](CHANGELOG.md) | 每个版本真正要紧的取舍与修掉的坑 |
 
 本机跑测试：
 
 ```bash
 npm install
-npm test        # 127 项，全部离线
+npm test        # 130 项，全部离线
 ```
 
 本机起一个不连飞书的实例（用内置的假 API 实现）：
@@ -174,7 +174,7 @@ RELAY_CONFIG=./config.json RELAY_SECRETS=./secrets.json node src/index.mjs
 | 存储 | SQLite，用 Node 内置的 `node:sqlite`，**无原生模块**，不需要编译器 |
 | 镜像 | 约 389MB（基于 `node:24-bookworm-slim`，不装任何 apt 包） |
 | 内存 | 实测常驻约 66MB，容器限 256MB |
-| 测试 | 127 项，全部离线 |
+| 测试 | 130 项，全部离线 |
 
 选 `node:sqlite` 而不是 `better-sqlite3`，是因为后者构建时要拉预编译二进制，slim 镜像里没有
 编译器，网络一抖构建就废。内置模块零依赖，构建永远可重现。

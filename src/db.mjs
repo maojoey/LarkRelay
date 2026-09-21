@@ -160,15 +160,26 @@ export function openDb(path) {
   }
 
   // poll_cursor 不在 SET 列里，保证刷新会话元信息时不会把独立维护的对账游标带丢。
+  // bot_member 用 COALESCE 合并：不确定的时候传 null，别把已知的 1 冲回 0。
+  // 用户身份枚举出来的会话不知道机器人在不在，所以它不传；只有机器人自己的事件或
+  // 机器人自己的会话列表才有资格置 1。
   const upsertChatStmt = db.prepare(`
-    INSERT INTO chats (chat_id, chat_type, peer_open_id, last_msg_at) VALUES (?,?,?,?)
+    INSERT INTO chats (chat_id, chat_type, peer_open_id, last_msg_at, bot_member)
+    VALUES (?,?,?,?,COALESCE(?,0))
     ON CONFLICT(chat_id) DO UPDATE SET
       chat_type = excluded.chat_type,
       peer_open_id = COALESCE(excluded.peer_open_id, chats.peer_open_id),
-      last_msg_at = COALESCE(excluded.last_msg_at, chats.last_msg_at)
+      last_msg_at = COALESCE(excluded.last_msg_at, chats.last_msg_at),
+      bot_member = COALESCE(?, chats.bot_member)
   `);
-  function upsertChat({ chatId, chatType, peerOpenId, lastMsgAt }) {
-    upsertChatStmt.run(chatId, chatType, peerOpenId ?? null, lastMsgAt ?? null);
+  function upsertChat({ chatId, chatType, peerOpenId, lastMsgAt, botMember }) {
+    const bm = botMember === undefined ? null : (botMember ? 1 : 0);
+    upsertChatStmt.run(chatId, chatType, peerOpenId ?? null, lastMsgAt ?? null, bm, bm);
+  }
+
+  /** 机器人确实在里面、因而拿机器人身份读得了的会话。对账只该碰这些。 */
+  function listBotChats() {
+    return db.prepare('SELECT * FROM chats WHERE bot_member = 1').all();
   }
 
   function setPollCursor(chatId, cursor) {
@@ -308,6 +319,7 @@ export function openDb(path) {
     upsertChat,
     setPollCursor,
     listPollableChats,
+    listBotChats,
     addAttachment,
     updateAttachment,
     listAttachments,

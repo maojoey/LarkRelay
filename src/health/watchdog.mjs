@@ -105,10 +105,14 @@ export function createWatchdog({ config, log, health, notify, userToken, authLin
       }
     }
 
+    // **对账失败不重启。** 重启能治的是「进程卡住了」，治不了「接口返回 400」——
+    // 后者重启一万次还是 400，只会变成重启循环，反而把正常工作的长连接一起打断。
+    // 2026-09-21 真踩过：会话表里混进了机器人读不了的会话，对账连败 → 判死 → 重启 → 再败。
+    // 这里只提醒，让人去看原因。
     if (s.pollFailStreak >= 3) {
-      await alert('poll', 'LarkRelay：对账连续 3 次失败，准备重启进程', { now });
-      log.error('看门狗判死：对账连续失败', { streak: s.pollFailStreak });
-      return true;
+      await alert('poll',
+        `⚠ 对账连续失败 ${s.pollFailStreak} 次：${s.pollLastError ?? '未知'}。`
+        + `实时消息不受影响，但断线期间漏掉的补不回来了。看 /healthz 与容器日志定位。`, { now });
     }
 
     if (s.splitSuspect) {
