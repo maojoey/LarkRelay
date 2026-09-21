@@ -115,7 +115,7 @@ star 过百的 50 个，翻下来只有三类东西：
 | [docs/SETUP.md](docs/SETUP.md) | 从零跑起来：飞书后台建应用、权限、部署、验收 |
 | [docs/OPERATIONS.md](docs/OPERATIONS.md) | 日常运维：部署、回滚、看日志、排错、切 webhook |
 | [docs/DECISIONS.md](docs/DECISIONS.md) | 为什么这么设计，以及为什么不用现成项目 |
-| [docs/PITFALLS.md](docs/PITFALLS.md) | 开发中真实踩到的九个坑，每个都带根因与防法 |
+| [docs/PITFALLS.md](docs/PITFALLS.md) | 开发中真实踩到的十个坑，每个都带根因与防法 |
 | [CHANGELOG.md](CHANGELOG.md) | 每个版本真正要紧的取舍与修掉的坑 |
 
 本机跑测试：

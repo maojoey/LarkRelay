@@ -23,13 +23,26 @@ const STATE_TTL_MS = 30 * 60_000;
 // **im:message.send_as_user 是唯一的写权限**：回传要以主人本人的名义发就必须有它。
 // 只想做只读归档（回传由机器人转达）的话，把它从这个列表里删掉，
 // 出站会自动降级成机器人发并在正文前加转达前缀——功能不断，只是落款不同。
+// **这张表就是授权链接里请求的 scope，拿到的令牌只会有这里列出的东西。**
+// 在开发者后台开通权限只是「允许申请」，不申请照样拿不到——2026-09-21 踩过：
+// 后台开好了建群权限，但这张表没改，重新授权后令牌里依然没有，白授权一次。
+// 可用 config.oauth.scopes 覆盖，改完不用重新部署。
 export const DEFAULT_USER_SCOPES = [
+  // 读自己的会话与消息
   'im:message:readonly',
   'im:message.p2p_msg:get_as_user',
   'im:message.group_msg:get_as_user',
   'im:chat:read',
+  'im:chat.members:read',
   'contact:user.base:readonly',
+  // 以本人名义发消息
   'im:message.send_as_user',
+  // 以本人名义建群与管群：这样建出来的群**群主直接就是本人**，不用事后转让
+  'im:chat:create_by_user',
+  'im:chat:update',
+  'im:chat.members:write_only',
+  'im:chat.managers:write_only',
+  // 缺了它就拿不到 refresh_token，令牌两小时后即死
   'offline_access',
 ];
 

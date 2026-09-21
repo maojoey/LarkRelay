@@ -41,6 +41,8 @@ describe('授权发起', () => {
     assert.ok(scope.includes('im:message.p2p_msg:get_as_user'));
     // 回传要以主人本人名义发就必须有这个写权限，漏了会在上线当天才发现
     assert.ok(scope.includes('im:message.send_as_user'));
+    // 后台开通 ≠ 拿得到：不在这张表里就不会被申请，令牌里也就没有。踩过一次。
+    assert.ok(scope.includes('im:chat:create_by_user'), '以本人名义建群的权限必须申请');
     assert.deepEqual(routes.scopes, DEFAULT_USER_SCOPES);
   });
 
