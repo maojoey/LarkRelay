@@ -10,8 +10,8 @@ import { parseArgs } from 'node:util';
 const USAGE = `用法：relay <子命令> [选项]
 
   health                                 查看运行状态（ok=false 时退出码 1）
-  send-text --to <谁> (--text <正文> | --text-file <路径>)
-  send-file --to <谁> --path <outgoing 下的相对路径> [--as-image]
+  send-text --to <谁> (--text <正文> | --text-file <路径>) [--as-me]
+  send-file --to <谁> --path <outgoing 下的相对路径> [--as-image] [--as-me]
   inbox [--since 1h|30m|2d] [--limit 20]  列出最近消息
   msg <message_id>                       单条详情（含附件）
   route <relay_message_id>               查转发映射
@@ -20,7 +20,8 @@ const USAGE = `用法：relay <子命令> [选项]
   auth --callback-url "<地址>"            同意之后把浏览器地址栏整条粘回来，完成授权
   archive                                手动跑一次用户身份归档
 
-  --to 可写 teacher 或 ou_ 开头的 open_id。
+  --to 可写 teacher、ou_ 开头的 open_id（单聊），或 oc_ 开头的 chat_id（群）。
+  --as-me 以主人本人的名义发（需要用户身份授权），不加就是机器人自己说话。
 
 **带标点或多行的正文请用 --text-file**：有些远程执行工具转发命令时会剥掉引号，
 先把正文写进文件再引用，才不会散架。
@@ -122,7 +123,7 @@ const CMDS = {
     if (!values.to) fail('缺 --to');
     const text = values['text-file'] ? await readFile(values['text-file'], 'utf8') : values.text;
     if (!text) fail('缺 --text 或 --text-file');
-    const r = await call(env, 'POST', '/api/send', { to: values.to, text });
+    const r = await call(env, 'POST', '/api/send', { to: values.to, text, identity: values['as-me'] ? 'owner' : 'bot' });
     process.stdout.write(`已排队（outbox #${r.id}）\n`);
   },
 
@@ -131,6 +132,7 @@ const CMDS = {
     if (!values.path) fail('缺 --path');
     const r = await call(env, 'POST', '/api/send-file', {
       to: values.to, path: values.path, as_image: Boolean(values['as-image']),
+      identity: values['as-me'] ? 'owner' : 'bot',
     });
     process.stdout.write(`已排队（outbox #${r.id}）\n`);
   },
@@ -232,6 +234,7 @@ const { values, positionals } = parseArgs({
     'text-file': { type: 'string' },
     path: { type: 'string' },
     'as-image': { type: 'boolean' },
+    'as-me': { type: 'boolean' },
     'callback-url': { type: 'string' },
     since: { type: 'string' },
     limit: { type: 'string' },
