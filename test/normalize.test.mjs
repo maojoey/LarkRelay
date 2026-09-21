@@ -188,9 +188,9 @@ test('没有响应体时退回原始 message，不要变成 undefined', async ()
 test('视频会议事件有可读摘要，不再是空卡片', () => {
   const out = normalize(wsEvent({
     messageType: 'video_chat',
-    content: JSON.stringify({ topic: '毛老师的研讨会的视频会议', meet_number: '314374302' }),
+    content: JSON.stringify({ topic: '周会的视频会议', meet_number: '100000000' }),
   }), 'ws');
-  assert.equal(out.text, '发起了视频会议：毛老师的研讨会的视频会议');
+  assert.equal(out.text, '发起了视频会议：周会的视频会议');
   assert.equal(out.ignore, undefined);
 });
 

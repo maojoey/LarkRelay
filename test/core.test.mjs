@@ -269,8 +269,8 @@ describe('去重、忽略与重试', () => {
     rig.db.setKv('bot_open_id', 'ou_bot');
     rig.handleEvent(inbound({
       message_id: 'om_g_at', chat_type: 'group', chat_id: 'oc_group',
-      sender_open_id: STUDENT, text: '@毛老师替身 这篇怎么看',
-      mentions: [{ key: '@_user_1', name: '毛老师替身', open_id: 'ou_bot' }],
+      sender_open_id: STUDENT, text: '@助理机器人 这篇怎么看',
+      mentions: [{ key: '@_user_1', name: '助理机器人', open_id: 'ou_bot' }],
     }));
     await rig.drain();
     assert.equal(rig.db.getMessage('om_g_at').status, 'done');

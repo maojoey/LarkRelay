@@ -14,8 +14,8 @@ const apiWith = (response) => createApi({
 });
 
 test('bot/v3/info 把 bot 放在顶层也能解出 open_id', async () => {
-  const api = apiWith({ code: 0, msg: 'ok', bot: { open_id: 'ou_bot1', app_name: '毛老师替身' } });
-  assert.deepEqual(await api.getBotInfo(), { openId: 'ou_bot1', name: '毛老师替身' });
+  const api = apiWith({ code: 0, msg: 'ok', bot: { open_id: 'ou_bot1', app_name: '助理机器人' } });
+  assert.deepEqual(await api.getBotInfo(), { openId: 'ou_bot1', name: '助理机器人' });
 });
 
 test('将来飞书要是补上 data 包层，也照样解得出', async () => {
