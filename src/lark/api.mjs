@@ -34,8 +34,9 @@ function fileTypeFor(localPath) {
   return FILE_TYPE_BY_EXT[extname(localPath).toLowerCase()] ?? 'stream';
 }
 
-export function createApi({ appId, appSecret, log }) {
-  const client = new lark.Client({
+// client 可注入：只为让测试能喂进真实的响应形状。不传就按正常方式自己建。
+export function createApi({ appId, appSecret, log, client: injected }) {
+  const client = injected ?? new lark.Client({
     appId,
     appSecret,
     appType: lark.AppType.SelfBuild,
@@ -253,6 +254,23 @@ export function createApi({ appId, appSecret, log }) {
     return out;
   }
 
+  // 拿机器人自己的 open_id。群里只转 @ 了它的消息，要靠这个比对 mentions。
+  // **机器人的 open_id 也是按应用隔离的**，换应用就变，所以只能问飞书要，不能写死在配置里。
+  // 端点是 v3 的老接口，SDK 类型里没有，用 client.request 直接打；纯查询。
+  async function getBotInfo() {
+    const data = await call(async () => {
+      const res = await client.request({ method: 'GET', url: '/open-apis/bot/v3/info' });
+      // **这个 v3 老接口把 bot 放在响应顶层，没有 data 包层。** unwrap 取的是 res.data，
+      // 原样传进去只会拿到 undefined，再一路静默变成 openId=null——2026-09-21 就这么白部署
+      // 了一次：没抛错、没日志、功能没生效。这里补一层形状对齐，code/msg 的错误处理照旧。
+      return { ...res, data: res?.data ?? (res?.bot ? { bot: res.bot } : undefined) };
+    }, 'getBotInfo');
+    const openId = data?.bot?.open_id ?? null;
+    // 拿不到就**抛**，不要返回 null 让调用方自己判断——静默的 null 正是上面那次白部署的根因。
+    if (!openId) throw new Error('getBotInfo 失败：飞书没返回机器人的 open_id');
+    return { openId, name: data?.bot?.app_name ?? null };
+  }
+
   // 拿「当前这个用户令牌属于谁」。授权回调里用它做身份校验：
   // 回调地址必须公开可达，不校验的话任何人都能用自己的账号走完流程、把主人的令牌顶掉。
   async function getUserInfo({ asUser }) {
@@ -267,7 +285,7 @@ export function createApi({ appId, appSecret, log }) {
     (await resolveP2pChats([peerOpenId], opts))[peerOpenId] ?? null;
 
   return {
-    getTenantToken, sendText, sendCard, sendFile, sendImage, download, listMessages, forward,
+    getTenantToken, getBotInfo, sendText, sendCard, sendFile, sendImage, download, listMessages, forward,
     listMyChats, resolveP2pChat, resolveP2pChats, getUserInfo,
   };
 }

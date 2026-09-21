@@ -250,6 +250,43 @@ describe('去重、忽略与重试', () => {
     assert.equal(sent(rig.api, 'sendCard').length, 0);
   });
 
+  // 用户 2026-09-21 定的规矩：群里没直接 @ 我的，入库就行，别推给我。
+  // 背景：早上给应用加了 im:message.group_msg 之后，机器人收得到群里全部消息，
+  // 原来「实时来的就等于 @ 了我的」这个前提失效了。
+  test('群里没 @ 机器人的消息只入库不转发', async () => {
+    rig.db.setKv('bot_open_id', 'ou_bot');
+    rig.handleEvent(inbound({
+      message_id: 'om_g_chat', chat_type: 'group', chat_id: 'oc_group',
+      sender_open_id: STUDENT, text: '大家周末有空吗', mentions: [],
+    }));
+    await rig.drain();
+    assert.equal(rig.db.getMessage('om_g_chat').status, 'ignored');
+    assert.equal(rig.db.getMessage('om_g_chat').text, '大家周末有空吗', '入库要保留正文');
+    assert.equal(sent(rig.api, 'sendCard').length, 0);
+  });
+
+  test('群里 @ 了机器人的照常转发', async () => {
+    rig.db.setKv('bot_open_id', 'ou_bot');
+    rig.handleEvent(inbound({
+      message_id: 'om_g_at', chat_type: 'group', chat_id: 'oc_group',
+      sender_open_id: STUDENT, text: '@毛老师替身 这篇怎么看',
+      mentions: [{ key: '@_user_1', name: '毛老师替身', open_id: 'ou_bot' }],
+    }));
+    await rig.drain();
+    assert.equal(rig.db.getMessage('om_g_at').status, 'done');
+    assert.equal(sent(rig.api, 'sendCard').length, 1);
+  });
+
+  test('认不出自己时退回照转——宁可吵，也不能把真的 @ 吞掉', async () => {
+    rig.handleEvent(inbound({
+      message_id: 'om_g_unknown', chat_type: 'group', chat_id: 'oc_group',
+      sender_open_id: STUDENT, text: '随便说一句', mentions: [],
+    }));
+    await rig.drain();
+    assert.equal(rig.db.getMessage('om_g_unknown').status, 'done');
+    assert.equal(sent(rig.api, 'sendCard').length, 1);
+  });
+
   test('轮询拉回来的群历史只归档不转发', async () => {
     // 群里机器人只收得到 @ 它的消息，所以「实时来的」才该转；
     // 轮询拉回来的是群里所有人说的话，全转会把主人淹掉

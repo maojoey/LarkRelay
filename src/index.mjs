@@ -107,6 +107,19 @@ export async function boot({ env = process.env } = {}) {
     reconcileTimer.unref?.();
     watchdog.start();
 
+    // 先认出自己是谁：群里只转 @ 了机器人的消息，要拿自己的 open_id 去比对 mentions。
+    // 拿不到就沿用库里上一次的结果；一次都没存过，handleEvent 会退回「群消息照转」——
+    // 宁可多推几张卡片，也不能把真的 @ 静默吞掉。
+    if (!config.bot_open_id) {
+      try {
+        const bot = await api.getBotInfo();
+        db.setKv('bot_open_id', bot.openId);
+        log.info('已确认机器人自己的 open_id', { name: bot.name });
+      } catch (e) {
+        log.warn('拿不到机器人自己的 open_id，群消息过滤沿用上一次的结果', { err: e.message });
+      }
+    }
+
     // 归档线只在授权过之后才跑；没授权时静默不动，healthz 里看得出来
     archiver.start((config.archive?.interval_sec ?? 300) * 1000);
     userToken.startKeepalive();
