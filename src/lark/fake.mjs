@@ -4,7 +4,7 @@ import { writeFile } from 'node:fs/promises';
 export function createFakeApi({ log } = {}) {
   const calls = [];
   const failures = new Map(); // method -> Error，触发一次就消费掉
-  const state = { seq: 0, downloadContent: 'fake', inbox: [], chats: [], userInfo: { openId: 'ou_owner', name: 'Owner' } };
+  const state = { seq: 0, downloadContent: 'fake', inbox: [], chats: [], botOpenId: 'ou_bot', userInfo: { openId: 'ou_owner', name: 'Owner' } };
 
   function record(method, args) {
     calls.push({ method, args });
@@ -116,11 +116,18 @@ export function createFakeApi({ log } = {}) {
     failures.set(method, error instanceof Error ? error : new Error(String(error)));
   }
 
+  async function getBotInfo() {
+    record('getBotInfo', []);
+    maybeFail('getBotInfo');
+    return { openId: state.botOpenId, name: '假机器人' };
+  }
+
   return {
     calls,
     reset,
     failNext,
     getTenantToken,
+    getBotInfo,
     sendText,
     sendCard,
     sendFile,
