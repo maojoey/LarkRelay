@@ -36,6 +36,8 @@
   },
   "archive": {
     "interval_sec": 300,
-    "backfill_days": 30
+    "backfill_days": 30,
+    "exclude_chats": [],
+    "_exclude_comment": "不归档的会话 chat_id（oc_ 开头）。整群连行都不写库，适合全是应用推卡片、没有人类消息的通知群。撤销排除后历史会补拉回来。"
   }
 }

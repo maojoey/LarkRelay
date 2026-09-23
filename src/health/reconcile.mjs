@@ -6,8 +6,8 @@
 import { createPull } from '../core/pull.mjs';
 
 
-export function createReconcile({ db, api, config, log, health, handleEvent }) {
-  const pull = createPull({ db, api, log, handleEvent });
+export function createReconcile({ db, api, config, log, health, handleEvent, isExcluded }) {
+  const pull = createPull({ db, api, log, handleEvent, isExcluded });
   // 首次见到会话同样回溯（理由同 archiver）：服务刚上线时机器人所在的群也该收进历史
   const backfillMs = (config.archive?.backfill_days ?? 30) * 86_400_000;
   const overlapMs = (config.reconcile?.overlap_sec ?? 600) * 1000;

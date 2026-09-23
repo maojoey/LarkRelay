@@ -214,6 +214,18 @@ ssh larkrelay-host "docker compose -f /opt/larkrelay/current/deploy/docker-compo
 翻页上限是 20 页 × 50 条 = 1000 条**，`backfill_days` 开得比这个上限对应的消息量还大、
 老会话又活跃的话，更早的部分会被截断收不进来。
 
+### 不归档某个会话
+
+`config.archive.exclude_chats` 填 `chat_id`（`oc_` 开头）的数组，整群**连行都不写库**——
+不是「入库但不转发」那种 `ignored`，是根本不收。适用于全是应用推卡片、没有人类消息的
+通知群（实测一个这样的群占了全库 69%，人类消息 0 条）。
+
+排除同时作用在两条入口：实时事件（`handleEvent`）和轮询补录（`pull`）。**必须两条都管**，
+因为应用/机器人发的消息走 `pull` 里的 `insertOutbound`，那条路绕开 `handleEvent`。
+
+被排除的会话**不推游标**，所以把 chat_id 从名单里拿掉之后，这段历史还能按
+`backfill_days` 补拉回来（受上面说的 1000 条翻页上限约束）。改完要重启容器才生效。
+
 ## 手动补录
 
 **里程碑 1 现状：没有带自定义时间范围的手动补录管理接口**（`bin/relay.mjs`、`/admin/*` 尚未实现，

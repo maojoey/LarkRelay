@@ -4,7 +4,7 @@
 //
 // 附件清单和「该不该忽略」在这里就定下来：messages 表没有这两列，
 // 等 worker 从库里捞行时已经看不见 normalize 的产物了。
-export function createHandleEvent({ db, config, log, wake }) {
+export function createHandleEvent({ db, config, log, wake, isExcluded }) {
   const teacherId = config.teacher_open_id;
 
   /**
@@ -28,6 +28,9 @@ export function createHandleEvent({ db, config, log, wake }) {
       log.warn('丢弃无 message_id 的事件', { transport: msg?.transport });
       return { dup: false, dropped: true };
     }
+
+    // 排除名单里的会话连行都不写（见 core/excluded.mjs）
+    if (isExcluded?.(msg.chat_id)) return { dup: false, dropped: true, excluded: true };
 
     const ignored = msg.ignore === true
       || (msg.sender_type && msg.sender_type !== 'user')
