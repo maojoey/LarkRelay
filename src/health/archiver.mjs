@@ -13,8 +13,8 @@ import { createPull } from '../core/pull.mjs';
 
 const DISCOVER_KEY = 'archiver_discovery_mode';
 
-export function createArchiver({ db, api, userToken, config, log, health, handleEvent }) {
-  const pull = createPull({ db, api, log, handleEvent });
+export function createArchiver({ db, api, userToken, config, log, health, handleEvent, isExcluded }) {
+  const pull = createPull({ db, api, log, handleEvent, isExcluded });
   const overlapMs = (config.reconcile?.overlap_sec ?? 600) * 1000;
   // 首次见到一个会话时回溯多久。默认 30 天：够把「上线前就存在的对话」收进来，
   // 又不至于一上来就把几年的历史全拉一遍（单会话分页上限 20×50=1000 条）。

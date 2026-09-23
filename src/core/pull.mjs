@@ -7,7 +7,7 @@ import { normalize } from '../lark/normalize.mjs';
 
 export const cursorKey = (chatId) => `poll_cursor:${chatId}`;
 
-export function createPull({ db, api, log, handleEvent }) {
+export function createPull({ db, api, log, handleEvent, isExcluded }) {
   /**
    * 拉一个会话在 [since-overlap, now] 窗口内的消息。
    * 窗口刻意重叠：飞书的 create_time 与我们收到的时刻不完全对齐，卡死边界会漏掉临界那条。
@@ -17,6 +17,9 @@ export function createPull({ db, api, log, handleEvent }) {
     chatId, chatType = 'p2p', asUser, now = Date.now(),
     overlapMs = 600_000, backfillMs, transport = 'poll',
   }) {
+    // 排除的会话直接不拉：也不推游标——将来撤销排除时才能把这段历史补回来
+    if (isExcluded?.(chatId)) return { scanned: 0, missed: 0, skipped: true };
+
     const saved = Number(db.getKv(cursorKey(chatId)) ?? 0);
     // **首次见到这个会话时要回溯一段历史，不能只拉重叠窗口。**
     // overlap 是为「补断线漏掉的那几条」设计的（十分钟量级）；

@@ -18,6 +18,7 @@ import { createWorker } from './core/worker.mjs';
 import { createHandleEvent } from './core/handleEvent.mjs';
 import { createReconcile } from './health/reconcile.mjs';
 import { createArchiver } from './health/archiver.mjs';
+import { createIsExcluded } from './core/excluded.mjs';
 import { createOAuth } from './lark/oauth.mjs';
 import { createUserToken } from './lark/user-token.mjs';
 import { createOAuthRoutes } from './core/oauth-routes.mjs';
@@ -52,15 +53,16 @@ export async function boot({ env = process.env } = {}) {
 
   let wakePending = false;
   const wake = () => { wakePending = true; };
-  const handleEvent = createHandleEvent({ db, config, log, wake });
+  const isExcluded = createIsExcluded(config);
+  const handleEvent = createHandleEvent({ db, config, log, wake, isExcluded });
 
-  const reconcile = createReconcile({ db, api, config, log, health, handleEvent });
+  const reconcile = createReconcile({ db, api, config, log, health, handleEvent, isExcluded });
 
   // 归档线：机器人看不到别人私聊主人的消息，只能用主人自己授权的身份去读
   const oauthRoutes = createOAuthRoutes({ db, oauth, api, userToken, config, log });
   const commands = createCommands({ oauthRoutes, log });
   const worker = createWorker({ db, api, files, outbox, router, config, log, commands });
-  const archiver = createArchiver({ db, api, userToken, config, log, health, handleEvent });
+  const archiver = createArchiver({ db, api, userToken, config, log, health, handleEvent, isExcluded });
   const notify = (text) => outbox.queue({
     target: { type: 'open_id', id: config.teacher_open_id },
     msgType: 'text', payload: { text }, purpose: 'alert',
