@@ -4,7 +4,12 @@ import { writeFile } from 'node:fs/promises';
 export function createFakeApi({ log } = {}) {
   const calls = [];
   const failures = new Map(); // method -> Error，触发一次就消费掉
-  const state = { seq: 0, downloadContent: 'fake', inbox: [], chats: [], botOpenId: 'ou_bot', userInfo: { openId: 'ou_owner', name: 'Owner' } };
+  const state = {
+    seq: 0, downloadContent: 'fake', inbox: [], chats: [], botOpenId: 'ou_bot',
+    userInfo: { openId: 'ou_owner', name: 'Owner' },
+    usersByOpenId: {}, // open_id -> name，供 getUserByOpenId 用
+    chatMembers: {}, // chat_id -> [{ member_id, name }]，供 listChatMembers 用
+  };
 
   function record(method, args) {
     calls.push({ method, args });
@@ -103,6 +108,18 @@ export function createFakeApi({ log } = {}) {
     return state.userInfo;
   }
 
+  async function getUserByOpenId(openId, opts = {}) {
+    record('getUserByOpenId', [openId, opts]);
+    maybeFail('getUserByOpenId');
+    return { name: state.usersByOpenId[openId] ?? null };
+  }
+
+  async function listChatMembers(chatId) {
+    record('listChatMembers', [chatId]);
+    maybeFail('listChatMembers');
+    return state.chatMembers[chatId] ?? [];
+  }
+
   function reset() {
     calls.length = 0;
     failures.clear();
@@ -110,6 +127,8 @@ export function createFakeApi({ log } = {}) {
     state.downloadContent = 'fake';
     state.inbox = [];
     state.chats = [];
+    state.usersByOpenId = {};
+    state.chatMembers = {};
   }
 
   function failNext(method, error) {
@@ -139,6 +158,8 @@ export function createFakeApi({ log } = {}) {
     resolveP2pChat,
     resolveP2pChats,
     getUserInfo,
+    getUserByOpenId,
+    listChatMembers,
     // 测试用检查面：download 的假内容、listMessages/listMyChats 的预置数据，都可直接读写。
     get downloadContent() { return state.downloadContent; },
     set downloadContent(v) { state.downloadContent = v; },
@@ -148,5 +169,9 @@ export function createFakeApi({ log } = {}) {
     set inbox(v) { state.inbox = v; },
     get chats() { return state.chats; },
     set chats(v) { state.chats = v; },
+    get usersByOpenId() { return state.usersByOpenId; },
+    set usersByOpenId(v) { state.usersByOpenId = v; },
+    get chatMembers() { return state.chatMembers; },
+    set chatMembers(v) { state.chatMembers = v; },
   };
 }

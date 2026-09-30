@@ -23,6 +23,7 @@ import { createOAuth } from './lark/oauth.mjs';
 import { createUserToken } from './lark/user-token.mjs';
 import { createOAuthRoutes } from './core/oauth-routes.mjs';
 import { createCommands } from './core/commands.mjs';
+import { createUpstream } from './core/upstream.mjs';
 import { createWatchdog } from './health/watchdog.mjs';
 import { createHttp } from './http.mjs';
 import { createWsTransport } from './transport/ws.mjs';
@@ -63,6 +64,8 @@ export async function boot({ env = process.env } = {}) {
   const commands = createCommands({ oauthRoutes, log });
   const worker = createWorker({ db, api, files, outbox, router, config, log, commands });
   const archiver = createArchiver({ db, api, userToken, config, log, health, handleEvent, isExcluded });
+  // 段缺失就是功能关闭：upstream.enabled 为 false 时 start() 是空操作，safeOnce() 直接短路返回。
+  const upstream = createUpstream({ db, api, outbox, userToken, config, log, health });
   const notify = (text) => outbox.queue({
     target: { type: 'open_id', id: config.teacher_open_id },
     msgType: 'text', payload: { text }, purpose: 'alert',
@@ -80,7 +83,7 @@ export async function boot({ env = process.env } = {}) {
 
   const http = createHttp({
     config, log, health, db, outbox, files, api, reconcile,
-    userToken, oauthRoutes, archiver,
+    userToken, oauthRoutes, archiver, upstream,
     webhookHandler: transport.handler,
   });
 
@@ -124,6 +127,8 @@ export async function boot({ env = process.env } = {}) {
 
     // 归档线只在授权过之后才跑；没授权时静默不动，healthz 里看得出来
     archiver.start((config.archive?.interval_sec ?? 300) * 1000);
+    // 段缺失时 start() 空操作，不建立任何定时器
+    upstream.start((config.upstream_notices?.interval_sec ?? 60) * 1000);
     userToken.startKeepalive();
     const ut = userToken.status();
     if (!ut.authorized) {
@@ -136,6 +141,7 @@ export async function boot({ env = process.env } = {}) {
     if (reconcileTimer) clearInterval(reconcileTimer);
     watchdog.stop();
     archiver.stop();
+    upstream.stop();
     userToken.stopKeepalive();
     await transport.stop();
     await http.close();
@@ -143,7 +149,7 @@ export async function boot({ env = process.env } = {}) {
     log.info('已停止');
   }
 
-  return { config, db, api, files, outbox, worker, handleEvent, reconcile, archiver, userToken, oauthRoutes, watchdog, http, transport, shutdown };
+  return { config, db, api, files, outbox, worker, handleEvent, reconcile, archiver, upstream, userToken, oauthRoutes, watchdog, http, transport, shutdown };
 }
 
 // 直接被 node 拉起时才自启；被测试 import 时不自启。

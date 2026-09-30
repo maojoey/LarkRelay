@@ -5,7 +5,7 @@ import path from 'node:path';
 
 const GB = 1024 ** 3;
 
-export function createHttp({ config, log, health, db, outbox, files, api, reconcile, webhookHandler, userToken, oauthRoutes, archiver }) {
+export function createHttp({ config, log, health, db, outbox, files, api, reconcile, webhookHandler, userToken, oauthRoutes, archiver, upstream }) {
   const token = config.secrets.admin_token;
 
   async function healthz() {
@@ -40,6 +40,12 @@ export function createHttp({ config, log, health, db, outbox, files, api, reconc
         failed_chats: s.archiveFailed,
         fail_streak: s.archiveFailStreak,
         last_error: s.archiveLastError,
+      },
+      upstream: {
+        enabled: upstream ? upstream.enabled : false,
+        last_at: s.upstreamLastAt,
+        last_error: s.upstreamLastError,
+        handed_24h: s.upstreamHanded24h,
       },
       uptime_ms: Date.now() - s.startedAt,
     };

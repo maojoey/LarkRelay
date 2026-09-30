@@ -301,6 +301,21 @@ export function openDb(path) {
     ).run(key, value, Date.now());
   }
 
+  // 整表替换一个群的成员名单：群成员会退群、换群，UPSERT 只会越攒越多，
+  // 必须先清空这个群的旧名单再写入新的，离群的人才会真正从候选里消失。
+  function replaceGroupMembers(chatId, members) {
+    db.exec('BEGIN');
+    try {
+      db.prepare('DELETE FROM group_members WHERE chat_id = ?').run(chatId);
+      const stmt = db.prepare('INSERT INTO group_members (chat_id, open_id, name) VALUES (?,?,?)');
+      for (const m of members) stmt.run(chatId, m.openId, m.name ?? null);
+      db.exec('COMMIT');
+    } catch (e) {
+      db.exec('ROLLBACK');
+      throw e;
+    }
+  }
+
   function counts() {
     const messages = { new: 0, processing: 0, failed: 0, done: 0 };
     for (const r of db.prepare('SELECT status, COUNT(*) AS n FROM messages GROUP BY status').all()) {
@@ -339,6 +354,7 @@ export function openDb(path) {
     findRoute,
     getKv,
     setKv,
+    replaceGroupMembers,
     counts,
   };
 }

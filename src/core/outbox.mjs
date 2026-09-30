@@ -15,9 +15,11 @@ export function createOutbox({ db, api, files, log, userToken }) {
   let ownerTarget = null;
   // purpose: forward | relay_reply | receipt | alert | manual
   // identity: 'bot'（默认）| 'owner'（以主人本人名义发，需要用户身份授权）
-  function queue({ target, msgType, payload, replyTo, purpose, routeOrigin, identity = 'bot' }) {
+  // uuid 可传入：上游系统自带的幂等键（比如通知 id）直接当飞书的 uuid 用，
+  // 不传就照旧自己生成一个。
+  function queue({ target, msgType, payload, replyTo, purpose, routeOrigin, identity = 'bot', uuid }) {
     return db.enqueue({
-      uuid: randomUUID(),
+      uuid: uuid ?? randomUUID(),
       target_type: target.type,
       target_id: target.id,
       msg_type: msgType,

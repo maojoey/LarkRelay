@@ -18,6 +18,11 @@ const state = {
   archiveFailed: 0,         // 本轮里读不了的会话数
   archiveFailStreak: 0,
   archiveLastError: null,
+
+  // 上游通知拉取器（拉队列 → 以主人名义转发 → 回执）
+  upstreamLastAt: null,
+  upstreamLastError: null,
+  upstreamHanded24h: 0,
 };
 
 export const health = {

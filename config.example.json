@@ -39,5 +39,11 @@
     "backfill_days": 30,
     "exclude_chats": [],
     "_exclude_comment": "不归档的会话 chat_id（oc_ 开头）。整群连行都不写库，适合全是应用推卡片、没有人类消息的通知群。撤销排除后历史会补拉回来。"
+  },
+  "upstream_notices": {
+    "_comment": "可选段。整段删掉 = 功能关闭，服务照常启动。段在但没配 url 会启动失败；密钥另存 secrets.upstream_token。",
+    "url": "https://internal.example.com/notices",
+    "interval_sec": 60,
+    "group_members_ttl_sec": 21600
   }
 }

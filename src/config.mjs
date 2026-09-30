@@ -25,6 +25,11 @@ export function loadConfig(env = process.env) {
   for (const k of REQUIRED_SECRETS) if (!sec[k]) throw new Error(`secrets.${k} 不能为空`);
   // webhook 模式才需要这两把；ws 模式下允许为空，但建应用时就填好可省一次密钥旅程。
   if (cfg.transport === 'webhook' && !sec.encrypt_key) throw new Error('webhook 模式必须有 secrets.encrypt_key');
+  // upstream_notices 段缺失 = 功能关闭，服务照常启动；段在但没配 url/token 就是配置错误，直接报清楚。
+  if (cfg.upstream_notices) {
+    if (!cfg.upstream_notices.url) throw new Error('config.upstream_notices.url 不能为空');
+    if (!sec.upstream_token) throw new Error('secrets.upstream_token 不能为空（config 里配了 upstream_notices）');
+  }
 
   return {
     ...cfg,

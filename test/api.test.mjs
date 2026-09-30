@@ -33,3 +33,40 @@ test('业务失败仍然按 code/msg 报错', async () => {
   const api = apiWith({ code: 99991679, msg: 'Unauthorized' });
   await assert.rejects(() => api.getBotInfo(), /code=99991679/);
 });
+
+test('getUserByOpenId 解出姓名', async () => {
+  const api = apiWith({ code: 0, data: { user: { name: '甲' } } });
+  assert.deepEqual(await api.getUserByOpenId('ou_a'), { name: '甲' });
+});
+
+test('getUserByOpenId 查不到姓名时给 null，不抛', async () => {
+  const api = apiWith({ code: 0, data: { user: {} } });
+  assert.deepEqual(await api.getUserByOpenId('ou_a'), { name: null });
+});
+
+test('listChatMembers 按 page_token 翻页，直到 has_more 为 false', async () => {
+  let calls = 0;
+  const api = createApi({
+    appId: 'cli_x',
+    appSecret: 'x',
+    log: silent,
+    client: {
+      request: async ({ params }) => {
+        calls += 1;
+        if (!params.page_token) {
+          return { code: 0, data: { items: [{ member_id: 'ou_a', name: '甲' }], has_more: true, page_token: 'p2' } };
+        }
+        assert.equal(params.page_token, 'p2');
+        return { code: 0, data: { items: [{ member_id: 'ou_b', name: '乙' }], has_more: false } };
+      },
+    },
+  });
+  const members = await api.listChatMembers('oc_1');
+  assert.deepEqual(members.map((m) => m.member_id), ['ou_a', 'ou_b']);
+  assert.equal(calls, 2);
+});
+
+test('listChatMembers 业务失败按 code/msg 报错', async () => {
+  const api = apiWith({ code: 99991672, msg: 'no permission' });
+  await assert.rejects(() => api.listChatMembers('oc_1'), /code=99991672/);
+});

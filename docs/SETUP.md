@@ -296,6 +296,49 @@ ssh larkrelay-host "docker compose -f /opt/larkrelay/current/deploy/docker-compo
    （默认 30 天），不是补断线漏消息用的 `overlap_sec`；单会话历史翻页上限 20 页 × 50 条
    = 1000 条，回溯窗口别开得比这个上限还夸张。
 
+## 第 6 步：接一个「上游通知拉取器」（可选）
+
+只有当你还有另一个内部服务需要「定时转发通知给具体某人」时才需要这步；不需要就跳过，
+不影响其他任何功能。完整协议与设计取舍见 [README.md](../README.md)「上游通知拉取器」。
+
+### 6.1 权限
+
+回到「权限管理」页面，额外开通一项机器人权限（按姓名解析收件人时，要能读机器人所在群的
+成员名单）：
+
+```
+im:chat:readonly
+```
+
+**验证**：已开通权限列表里能看到这一条。
+
+### 6.2 配置
+
+`config.json` 加一段：
+
+```json
+"upstream_notices": {
+  "url": "https://internal.example.com/notices",
+  "interval_sec": 60,
+  "group_members_ttl_sec": 21600
+}
+```
+
+`secrets.json` 加一把：
+
+```json
+"upstream_token": "上游服务发给你的 Bearer token"
+```
+
+`url` 段缺失 = 功能关闭；段在但没填 `url` 或没配 `upstream_token`，服务会在启动时直接报错，
+不会静默跳过。
+
+### 6.3 验证
+
+重启服务后看 `/healthz` 里的 `upstream.enabled` 是不是 `true`；等一个 `interval_sec` 周期后
+看 `upstream.last_at` 有没有推进、`upstream.last_error` 是不是 `null`。真正端到端验证需要
+上游那边先放一条测试通知进队列，收件人挑一个你确定跟机器人私聊过或在机器人所在群里的人。
+
 ## 出问题了看哪里
 
 | 症状 | 多半是 | 怎么办 |
@@ -305,5 +348,6 @@ ssh larkrelay-host "docker compose -f /opt/larkrelay/current/deploy/docker-compo
 | `/healthz` 的 `ws_state` 一直不是 `connected` | 事件订阅没选长连接，或 App Secret 错了 | 回 1.4 核对；看容器日志 |
 | 发了消息但没收到卡片 | 事件没订阅上，或被别处分流 | 看 `/healthz` 的 `split_suspect` |
 | 回复卡片没回传 | 回复的不是卡片而是别的消息 | 看回执说了什么 |
+| 上游通知一直没转发出去 | 收件人解析 0 命中/多命中 | 上游侧看 ack 回的中文 `error`；确认那人跟机器人私聊过或在机器人所在的群里 |
 
 日常运维命令全在 `docs/OPERATIONS.md`；踩过的坑和怎么防见 `docs/PITFALLS.md`。

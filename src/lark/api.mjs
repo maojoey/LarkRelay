@@ -284,8 +284,42 @@ export function createApi({ appId, appSecret, log, client: injected }) {
   const resolveP2pChat = async (peerOpenId, opts) =>
     (await resolveP2pChats([peerOpenId], opts))[peerOpenId] ?? null;
 
+  // 拿一个人在**本应用下**的 open_id 对应的姓名。用于上游通知按姓名找人时，
+  // 单聊对端名字缺失的补拉。机器人身份（不传 asUser）就够用，令牌可用时传用户身份也行——
+  // 两种身份下这个接口都能查（前提是 contact:user.base:readonly 权限已开）。
+  async function getUserByOpenId(openId, { asUser } = {}) {
+    const data = await call(() => client.request({
+      method: 'GET',
+      url: `/open-apis/contact/v3/users/${openId}`,
+      params: { user_id_type: 'open_id' },
+    }, userOpts(asUser)), 'getUserByOpenId');
+    return { name: data?.user?.name ?? null };
+  }
+
+  // 列出一个群当前的成员：open_id + 姓名。机器人身份即可（机器人得先在群里才读得到）。
+  // 用于上游通知按姓名找人时，把「同一个群里的人」也算进候选——很多学生没跟主人私聊过。
+  async function listChatMembers(chatId) {
+    const items = [];
+    let pageToken;
+    for (let page = 0; page < 20; page += 1) {
+      const data = await call(() => client.request({
+        method: 'GET',
+        url: `/open-apis/im/v1/chats/${chatId}/members`,
+        params: {
+          member_id_type: 'open_id',
+          page_size: 100,
+          ...(pageToken ? { page_token: pageToken } : {}),
+        },
+      }), 'listChatMembers');
+      items.push(...(data?.items ?? []));
+      if (!data?.has_more || !data?.page_token) break;
+      pageToken = data.page_token;
+    }
+    return items;
+  }
+
   return {
     getTenantToken, getBotInfo, sendText, sendCard, sendFile, sendImage, download, listMessages, forward,
-    listMyChats, resolveP2pChat, resolveP2pChats, getUserInfo,
+    listMyChats, resolveP2pChat, resolveP2pChats, getUserInfo, getUserByOpenId, listChatMembers,
   };
 }
